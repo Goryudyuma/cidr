@@ -1,0 +1,31 @@
+{
+  "name": "cidr-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.7.0",
+    "npm": "11.5.1"
+  },
+  "packageManager": "npm@11.5.1",
+  "scripts": {
+    "wasm": "node scripts/build-wasm.mjs",
+    "dev": "npm run wasm && vite --config web/vite.config.ts",
+    "typecheck": "tsc --noEmit -p web/tsconfig.json",
+    "build": "npm run wasm && npm run typecheck && vite build --config web/vite.config.ts",
+    "build:api": "go build -trimpath -o bin/cidr-api ./cmd/api",
+    "preview": "vite preview --config web/vite.config.ts",
+    "deploy": "npm run build && wrangler deploy",
+    "test:go": "go test -race ./...",
+    "test:browser": "npm run build && playwright test",
+    "test:cache": "node scripts/check-cache.mjs",
+    "test": "npm run test:go && npm run test:browser"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "wrangler": "4.136.1"
+  }
+}
