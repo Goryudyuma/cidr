@@ -128,3 +128,9 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/cidr-playwright-browsers \
 - 公開確認スクリプトをローカルWranglerへ実行し、共通37ケース、英語直リンク、オフラインの言語切替・編集が成功。ビルドと配信のWasm・ランタイムが一致し、ブラウザ実行時エラーは0件
 
 Vite 8がWorkerのURLをテンプレートリテラルで生成するため、キャッシュ検査も対応しました。WorkerのURLを検出できない場合は検査を失敗させ、Workerを確認せずに成功することを防ぎます。
+
+## Dependabot: TypeScriptとNode.js型定義の互換性
+
+2026年9月22日、typescript-eslint 8.70.1のTypeScript対応範囲（`>=4.8.4 <6.1.0`）に合わせてTypeScript 6.0.3を採用しました。`@types/node`は実行環境のNode.js 24系に合わせ、24.13.3へ更新しています。どちらも公開から30日以上経ったバージョンです。
+
+Node.js 24.7.0で`npm ci`、ESLint、Prettier、TypeScript型チェック、Wasm・フロントエンドのビルド、実Chromiumの18テストが成功しました。共通37ケースによるネイティブGo・HTTP・Wasmの一致も確認しています。TypeScript 7とNode.js 26用の型定義は取り込まず、通常のmajor更新PRを保留する設定にしました。セキュリティ更新は引き続き対象です。

@@ -13,6 +13,13 @@ updates:
     cooldown:
       default-days: 30
     open-pull-requests-limit: 5
+    # Revisit when typescript-eslint supports the next major or Node.js is upgraded.
+    # update-types preserves security updates, unlike an ignored version range.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         patterns: ["*"]
