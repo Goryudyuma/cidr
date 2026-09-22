@@ -86,7 +86,9 @@ CORSは既定で無効です。別のWebアプリからAPIを呼ぶ場合だけ�
 
 ## Cloudflare Workersへのデプロイ
 
-公開先: [日本語](https://cidr.goryudyuma.workers.dev/) / [English](https://cidr.goryudyuma.workers.dev/en/)
+本番の公開先: [日本語](https://cidr.063.jp/) / [English](https://cidr.063.jp/en/)
+
+既存の[workers.dev URL](https://cidr.goryudyuma.workers.dev/)でも同じ本番版を公開しています。
 
 既存のWorkersプロジェクト`cidr`には、`wrangler.jsonc`で指定した`web/dist/`をStatic Assetsとして配信します。Cloudflare側でWasmを実行せず、ブラウザに読み込んで実行します。この配信にはネイティブGo APIを含めません。
 
@@ -102,13 +104,21 @@ npm run build
 npx wrangler deploy --dry-run
 
 # 公開後、実ブラウザで共通ケースとオフライン編集を確認
-node scripts/smoke-deployment.mjs https://cidr.goryudyuma.workers.dev/
+node scripts/smoke-deployment.mjs https://cidr.063.jp/
 
 # 本番のETag、304、更新時の200とキャッシュ方針を確認
-npm run test:cache -- https://cidr.goryudyuma.workers.dev/
+npm run test:cache -- https://cidr.063.jp/
 ```
 
 アカウントIDとプロジェクト名は`wrangler.jsonc`に固定しています。トークンはリポジトリへ保存せず、Wranglerのログイン状態、または`CLOUDFLARE_API_TOKEN`環境変数を使います。
+
+### 本番用カスタムドメイン
+
+`cidr.063.jp`はCloudflare側でWorker `cidr`に紐付けたCustom Domainです。このドメインのプレビューは無効で、`main`からデプロイした本番版を配信します。英語版は`https://cidr.063.jp/en/`です。
+
+`063.jp`は同じCloudflareアカウントで有効なDNSゾーンになっているため、Custom Domainの登録時にDNSレコードとHTTPS証明書が自動作成されます。レジストラ側のネームサーバー変更や、`workers.dev`を指すCNAME・IPアドレス・TXTの手動追加は不要です。[Cloudflare公式手順](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)を参照してください。
+
+ドメインの紐付けはCloudflareのAPIまたは`Workers & Pages → cidr → Settings → Domains & Routes`で管理します。`wrangler.jsonc`には`routes`を宣言せず、通常のデプロイで既存のCustom Domainを保持します。このため、GitHub ActionsのトークンにDNS・ゾーンの編集権限を追加する必要はありません。デプロイ後はカスタムドメインと`workers.dev`の両方でキャッシュを検査します。
 
 ### GitHub Actions
 

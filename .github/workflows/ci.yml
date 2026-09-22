@@ -194,4 +194,6 @@ jobs:
           npx --no-install wrangler deploy
       - name: Verify production cache headers and conditional responses
         if: steps.current.outputs.deploy == 'true'
-        run: node scripts/check-cache.mjs https://cidr.goryudyuma.workers.dev/
+        run: |
+          node scripts/check-cache.mjs https://cidr.063.jp/
+          node scripts/check-cache.mjs https://cidr.goryudyuma.workers.dev/
