@@ -1,76 +1,84 @@
 import './style.css';
-import { Engine } from './engine';
+import { Engine, formatEngineError } from './engine';
+import { getLocale, setLocale, localeURL, localeFromURL, type Locale } from './i18n';
+import { text, type MessageKey } from './messages';
 import type { Operation, Request, Result } from './types';
 import { Visualization } from './visualization';
+
+const label = (key: MessageKey): string => `<span data-i18n="${key}">${text(key)}</span>`;
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <div class="app-shell">
     <header class="site-header">
-      <a class="brand" href="./" aria-label="CIDR Studio ホーム"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>CIDR<span class="brand-light"> Studio</span></span></a>
-      <div id="engine-status" class="engine-status" role="status" data-state="loading"><span class="status-dot"></span><span id="engine-status-text">計算エンジンを読み込み中</span></div>
+      <a class="brand" href="${localeURL(getLocale()).pathname}" data-i18n-aria="home" aria-label="${text('home')}"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>CIDR<span class="brand-light"> Studio</span></span></a>
+      <nav class="language-switch" data-i18n-aria="language" aria-label="${text('language')}">
+        <a id="language-ja" href="${localeURL('ja').pathname}" lang="ja" hreflang="ja">日本語</a>
+        <a id="language-en" href="${localeURL('en').pathname}" lang="en" hreflang="en">English</a>
+      </nav>
+      <div id="engine-status" class="engine-status" role="status" data-state="loading"><span class="status-dot"></span><span id="engine-status-text">${text('engineLoading')}</span></div>
     </header>
 
     <main>
       <div class="page-heading">
-        <div><p class="eyebrow">IP ADDRESS WORKSPACE</p><h1>アドレスの集合を、見渡す。</h1><p class="page-description">IP・CIDRを追加、除外して、必要な範囲だけに整理します。</p></div>
-        <button id="reset-set" class="button button-quiet" type="button" disabled><span aria-hidden="true">↺</span> すべてリセット</button>
+        <div><p class="eyebrow">IP ADDRESS WORKSPACE</p><h1>${label('heading')}</h1><p class="page-description">${label('introduction')}</p></div>
+        <button id="reset-set" class="button button-quiet" type="button" disabled><span aria-hidden="true">↺</span> ${label('reset')}</button>
       </div>
       <div id="error-banner" class="error-banner" role="alert" hidden></div>
 
       <div class="workspace">
-        <aside class="editor-column" aria-label="集合の編集">
+        <aside class="editor-column" data-i18n-aria="editor" aria-label="${text('editor')}">
           <section class="panel input-panel">
-            <div class="section-heading"><div><span class="step-number">01</span><h2>初期集合</h2></div><button id="load-example" class="text-button" type="button" disabled>サンプル</button></div>
-            <label for="initial-input" class="field-label">IP / CIDR <span>1行に1件</span></label>
+            <div class="section-heading"><div><span class="step-number">01</span><h2>${label('initial')}</h2></div><button id="load-example" class="text-button" type="button" disabled>${label('sample')}</button></div>
+            <label for="initial-input" class="field-label">IP / CIDR ${label('onePerLine')}</label>
             <textarea id="initial-input" spellcheck="false" autocomplete="off" rows="7" aria-describedby="initial-help" placeholder="192.0.2.0/24&#10;2001:db8::/120">192.0.2.0/24
 2001:db8::/120</textarea>
-            <p id="initial-help" class="field-help">IPv4・IPv6を混在できます。適用すると操作履歴も初期化します。</p>
-            <button id="apply-initial" class="button button-primary full-width" type="button" disabled>初期集合を適用 <span aria-hidden="true">→</span></button>
+            <p id="initial-help" class="field-help">${label('initialHelp')}</p>
+            <button id="apply-initial" class="button button-primary full-width" type="button" disabled>${label('apply')} <span aria-hidden="true">→</span></button>
             <p id="draft-status" class="draft-status" aria-live="polite"></p>
           </section>
 
           <section class="panel operation-panel">
-            <div class="section-heading"><div><span class="step-number">02</span><h2>集合を編集</h2></div></div>
-            <label for="operation-input" class="field-label">追加・除外する IP / CIDR</label>
+            <div class="section-heading"><div><span class="step-number">02</span><h2>${label('edit')}</h2></div></div>
+            <label for="operation-input" class="field-label" data-i18n="operationInput">${text('operationInput')}</label>
             <input id="operation-input" class="mono-input" spellcheck="false" autocomplete="off" placeholder="192.0.2.64/26" aria-describedby="operation-help" />
-            <div class="operation-buttons"><button id="add-operation" class="button button-add" type="button" disabled><span aria-hidden="true">＋</span> 追加</button><button id="remove-operation" class="button button-remove" type="button" disabled><span aria-hidden="true">−</span> 除外</button></div>
-            <p id="operation-help" class="field-help">操作は上から順に適用されます。除外した範囲も、あとから追加できます。</p>
-            <div class="history-heading"><h3>操作履歴</h3><span id="operation-count" class="count-badge">0</span></div>
+            <div class="operation-buttons"><button id="add-operation" class="button button-add" type="button" disabled><span aria-hidden="true">＋</span> ${label('add')}</button><button id="remove-operation" class="button button-remove" type="button" disabled><span aria-hidden="true">−</span> ${label('remove')}</button></div>
+            <p id="operation-help" class="field-help">${label('operationHelp')}</p>
+            <div class="history-heading"><h3>${label('history')}</h3><span id="operation-count" class="count-badge">0</span></div>
             <ol id="operation-history" class="operation-history"></ol>
             <div id="history-pagination" class="pagination" hidden></div>
           </section>
-          <p class="local-note"><span class="local-icon" aria-hidden="true">◈</span><span>計算はこのブラウザ内で完結します。<br>入力したアドレスは送信されません。</span></p>
+          <p class="local-note"><span class="local-icon" aria-hidden="true">◈</span><span>${label('localCalculation')}<br> ${label('privateInput')}</span></p>
         </aside>
 
         <div class="result-column">
-          <section class="stats" aria-label="集合の集計">
-            <div class="stat"><span class="stat-label"><span class="family-dot ipv4"></span>IPv4 アドレス数</span><strong id="count-ipv4" class="stat-value">0</strong><span class="stat-unit">addresses</span></div>
-            <div class="stat"><span class="stat-label"><span class="family-dot ipv6"></span>IPv6 アドレス数</span><strong id="count-ipv6" class="stat-value">0</strong><span class="stat-unit">addresses</span></div>
-            <div class="stat stat-compact"><span class="stat-label">最小CIDR</span><strong id="cidr-count" class="stat-value">0</strong><span class="stat-unit">prefixes</span></div>
+          <section class="stats" data-i18n-aria="totals" aria-label="${text('totals')}">
+            <div class="stat"><span class="stat-label"><span class="family-dot ipv4"></span>${label('ipv4Count')}</span><strong id="count-ipv4" class="stat-value">0</strong><span class="stat-unit">addresses</span></div>
+            <div class="stat"><span class="stat-label"><span class="family-dot ipv6"></span>${label('ipv6Count')}</span><strong id="count-ipv6" class="stat-value">0</strong><span class="stat-unit">addresses</span></div>
+            <div class="stat stat-compact"><span class="stat-label">${label('cidrs')}</span><strong id="cidr-count" class="stat-value">0</strong><span class="stat-unit">prefixes</span></div>
           </section>
 
           <section class="panel visualization-panel" aria-labelledby="visualization-heading">
-            <div class="visualization-heading"><div><span class="eyebrow">ADDRESS SPACE</span><h2 id="visualization-heading">集合の見取り図</h2></div><div class="segmented-control" aria-label="表示範囲"><button id="view-fit" type="button" class="active" aria-pressed="true">集合に合わせる</button><button id="view-all" type="button" aria-pressed="false">全体 /0</button></div></div>
-            <form id="zoom-form" class="zoom-form"><label for="zoom-input">表示範囲</label><input id="zoom-input" class="mono-input" placeholder="IP / CIDRを指定してズーム" spellcheck="false" autocomplete="off" /><button id="zoom-submit" class="button button-quiet" type="submit" disabled>ズーム <span aria-hidden="true">↗</span></button></form>
+            <div class="visualization-heading"><div><span class="eyebrow">ADDRESS SPACE</span><h2 id="visualization-heading">${label('overview')}</h2></div><div class="segmented-control" data-i18n-aria="viewport" aria-label="${text('viewport')}"><button id="view-fit" type="button" class="active" aria-pressed="true">${label('fit')}</button><button id="view-all" type="button" aria-pressed="false">${label('all')}</button></div></div>
+            <form id="zoom-form" class="zoom-form"><label for="zoom-input">${label('viewport')}</label><input id="zoom-input" class="mono-input" data-i18n-placeholder="zoomPlaceholder" placeholder="${text('zoomPlaceholder')}" spellcheck="false" autocomplete="off" /><button id="zoom-submit" class="button button-quiet" type="submit" disabled>${label('zoom')} <span aria-hidden="true">↗</span></button></form>
             <p id="zoom-error" class="inline-error" role="alert" hidden></p>
             <div id="visualization"></div>
-            <div class="plot-legend"><span><i class="legend-band"></i>集合に含む範囲</span><span><i class="legend-marker"></i>表示幅より小さい範囲</span><span>両端のアドレスを含みます</span></div>
+            <div class="plot-legend"><span><i class="legend-band"></i>${label('legendBand')}</span><span><i class="legend-marker"></i>${label('legendMarker')}</span><span>${label('inclusive')}</span></div>
           </section>
 
-          <section class="panel output-panel" aria-label="計算結果">
-            <div class="output-heading"><div class="output-tabs" role="tablist" aria-label="結果の形式"><button id="tab-cidrs" class="active" type="button" role="tab" aria-selected="true" aria-controls="cidrs-panel">最小CIDR <span id="cidr-tab-count" class="count-badge">0</span></button><button id="tab-ranges" type="button" role="tab" aria-selected="false" aria-controls="ranges-panel" tabindex="-1">連続範囲 <span id="range-tab-count" class="count-badge">0</span></button></div><button id="copy-cidrs" class="text-button" type="button" disabled>コピー <span aria-hidden="true">⧉</span></button></div>
+          <section class="panel output-panel" data-i18n-aria="results" aria-label="${text('results')}">
+            <div class="output-heading"><div class="output-tabs" role="tablist" data-i18n-aria="resultFormat" aria-label="${text('resultFormat')}"><button id="tab-cidrs" class="active" type="button" role="tab" aria-selected="true" aria-controls="cidrs-panel">${label('cidrs')} <span id="cidr-tab-count" class="count-badge">0</span></button><button id="tab-ranges" type="button" role="tab" aria-selected="false" aria-controls="ranges-panel" tabindex="-1">${label('ranges')} <span id="range-tab-count" class="count-badge">0</span></button></div><button id="copy-cidrs" class="text-button" type="button" disabled>${label('copy')} <span aria-hidden="true">⧉</span></button></div>
             <div id="cidrs-panel" role="tabpanel" aria-labelledby="tab-cidrs"><div class="output-table-heading"><span>NETWORK / PREFIX</span><span>FAMILY</span></div><ol id="cidr-list" class="cidr-list"></ol><div id="cidr-pagination" class="pagination" hidden></div></div>
-            <div id="ranges-panel" role="tabpanel" aria-labelledby="tab-ranges" hidden><div class="output-table-heading"><span>START → END（両端を含む）</span><span>FAMILY</span></div><ol id="range-list" class="range-list"></ol><div id="range-pagination" class="pagination" hidden></div></div>
-            <div class="output-footer"><span id="result-status" role="status">計算エンジンの準備を待っています</span><span id="copy-status" role="status"></span></div>
+            <div id="ranges-panel" role="tabpanel" aria-labelledby="tab-ranges" hidden><div class="output-table-heading"><span>${label('rangeHeading')}</span><span>FAMILY</span></div><ol id="range-list" class="range-list"></ol><div id="range-pagination" class="pagination" hidden></div></div>
+            <div class="output-footer"><span id="result-status" role="status">${text('waiting')}</span><span id="copy-status" role="status"></span></div>
           </section>
         </div>
       </div>
     </main>
     <footer class="site-footer">
-      <div class="footer-info"><span class="footer-brand">CIDR Studio</span><span>IPv4 + IPv6 · 集合演算・CIDR集約</span></div>
-      <a class="sponsor-link" href="https://github.com/sponsors/Goryudyuma" target="_blank" rel="noopener noreferrer" aria-label="GitHub Sponsorsで支援（新しいタブで開きます）">
+      <div class="footer-info"><span class="footer-brand">CIDR Studio</span><span>${label('footer')}</span></div>
+      <a class="sponsor-link" href="https://github.com/sponsors/Goryudyuma" target="_blank" rel="noopener noreferrer" data-i18n-aria="sponsorLabel" aria-label="${text('sponsorLabel')}">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" /></svg>
-        GitHub Sponsorsで支援 <span aria-hidden="true">↗</span>
+        ${label('sponsor')} <span aria-hidden="true">↗</span>
       </a>
     </footer>
   </div>`;
@@ -96,6 +104,69 @@ let rangePage = 0;
 let historyPage = 0;
 const pageSize = 40;
 const historyPageSize = 10;
+let resultState: MessageKey = 'waiting';
+let elapsedMS = 0;
+let copyState: 'copied' | 'copyFailed' | undefined;
+let visibleError: unknown;
+let zoomFailure: unknown;
+
+function setResultStatus(state: MessageKey): void {
+  resultState = state;
+  resultStatus.textContent = text(state) + (state === 'complete' ? ` · ${elapsedMS.toLocaleString(getLocale())} ms` : '');
+}
+
+function setCopyStatus(state: 'copied' | 'copyFailed'): void {
+  copyState = state;
+  $('#copy-status').textContent = text(state);
+}
+
+function refreshLocale(): void {
+  document.documentElement.lang = getLocale();
+  document.title = text('title');
+  document.querySelector<HTMLMetaElement>('meta[name="description"]')!.content = text('description');
+  for (const element of document.querySelectorAll<HTMLElement>('[data-i18n]')) {
+    element.textContent = text(element.dataset.i18n as MessageKey);
+  }
+  for (const [data, attribute] of [['data-i18n-aria', 'aria-label'], ['data-i18n-placeholder', 'placeholder']]) {
+    for (const element of document.querySelectorAll(`[${data}]`)) {
+      element.setAttribute(attribute, text(element.getAttribute(data) as MessageKey));
+    }
+  }
+  $<HTMLAnchorElement>('.brand').href = localeURL(getLocale()).pathname;
+  for (const locale of ['ja', 'en'] as const) {
+    document.querySelector<HTMLLinkElement>(`link[rel="alternate"][hreflang="${locale}"]`)!.href = localeURL(locale).pathname;
+    const link = $<HTMLAnchorElement>(`#language-${locale}`);
+    if (getLocale() === locale) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  // Refresh labels without recalculating, replacing input nodes or resetting views.
+  renderHistory(); renderCidrs(); renderRanges();
+  visualization.refreshLocale();
+  updateControls();
+  setResultStatus(resultState);
+  if (copyState) setCopyStatus(copyState);
+  if (!errorBanner.hidden) errorBanner.textContent = formatEngineError(visibleError);
+  if (!$('#zoom-error').hidden) $('#zoom-error').textContent = formatEngineError(zoomFailure);
+}
+
+function changeLocale(locale: Locale): void {
+  if (getLocale() === locale) return;
+  setLocale(locale);
+  refreshLocale();
+}
+
+for (const locale of ['ja', 'en'] as const) {
+  $(`#language-${locale}`).addEventListener('click', (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    if (getLocale() === locale) return;
+    const url = new URL(window.location.href);
+    url.pathname = localeURL(locale).pathname;
+    history.pushState(null, '', url);
+    changeLocale(locale);
+  });
+}
+window.addEventListener('popstate', () => changeLocale(localeFromURL()));
 
 function inputLines(): string[] { return initialInput.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean); }
 function isDraft(): boolean { return JSON.stringify(inputLines()) !== JSON.stringify(initial); }
@@ -107,20 +178,15 @@ function updateControls(): void {
   $<HTMLButtonElement>('#reset-set').disabled = !ready;
   $<HTMLButtonElement>('#zoom-submit').disabled = !ready || !zoomInput.value.trim();
   $<HTMLButtonElement>('#copy-cidrs').disabled = !ready || result.cidrs.length === 0;
-  $('#draft-status').textContent = ready && isDraft() ? '初期集合に未適用の変更があります。' : '';
+  $('#draft-status').textContent = ready && isDraft() ? text('draft') : '';
   const status = $('#engine-status');
   status.dataset.state = failed ? 'failed' : busy || !ready ? 'loading' : 'ready';
-  $('#engine-status-text').textContent = failed ? '計算エンジンを利用できません' : !ready ? '計算エンジンを読み込み中' : busy ? '集合を計算中' : 'ローカル計算・準備完了';
-}
-
-function errorDescription(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const detail = error as Error & { code?: string; field?: string };
-  return `${detail.message}${detail.field ? ` · ${detail.field}` : ''}${detail.code ? ` [${detail.code}]` : ''}`;
+  $('#engine-status-text').textContent = failed ? text('engineFailed') : !ready ? text('engineLoading') : busy ? text('engineBusy') : text('engineReady');
 }
 
 function showError(error: unknown): void {
-  errorBanner.textContent = errorDescription(error);
+  visibleError = error;
+  errorBanner.textContent = formatEngineError(error);
   errorBanner.hidden = false;
 }
 
@@ -129,7 +195,7 @@ function clearError(): void { errorBanner.hidden = true; errorBanner.textContent
 function invalidatePending(): void {
   generation++;
   zoomGeneration++;
-  if (busy) resultStatus.textContent = '入力が変更されたため、計算結果の反映を取り消しました';
+  if (busy) setResultStatus('canceled');
   busy = false;
   updateControls();
 }
@@ -139,7 +205,7 @@ async function evaluate(request: Request, afterCommit?: () => void): Promise<voi
   zoomGeneration++;
   busy = true;
   clearError();
-  resultStatus.textContent = '計算中…';
+  setResultStatus('calculating');
   updateControls();
   const started = performance.now();
   try {
@@ -153,11 +219,12 @@ async function evaluate(request: Request, afterCommit?: () => void): Promise<voi
     historyPage = Math.max(0, Math.ceil(operations.length / historyPageSize) - 1);
     afterCommit?.();
     renderResult();
-    resultStatus.textContent = `計算完了 · ${Math.max(1, Math.round(performance.now() - started)).toLocaleString()} ms`;
+    elapsedMS = Math.max(1, Math.round(performance.now() - started));
+    setResultStatus('complete');
   } catch (error) {
     if (current !== generation) return;
     showError(error);
-    resultStatus.textContent = '入力を確認してください。集合は更新されていません。';
+    setResultStatus('invalid');
   } finally {
     if (current === generation) { busy = false; updateControls(); }
   }
@@ -167,10 +234,10 @@ function renderPagination(container: HTMLElement, count: number, page: number, s
   container.replaceChildren();
   container.hidden = count <= size;
   if (container.hidden) return;
-  const previous = document.createElement('button'); previous.type = 'button'; previous.textContent = '← 前へ'; previous.disabled = page === 0;
+  const previous = document.createElement('button'); previous.type = 'button'; previous.textContent = `← ${text('previous')}`; previous.disabled = page === 0;
   previous.addEventListener('click', () => onChange(page - 1));
-  const label = document.createElement('span'); label.textContent = `${page * size + 1}–${Math.min((page + 1) * size, count)} / ${count.toLocaleString()}`;
-  const next = document.createElement('button'); next.type = 'button'; next.textContent = '次へ →'; next.disabled = (page + 1) * size >= count;
+  const label = document.createElement('span'); label.textContent = `${page * size + 1}–${Math.min((page + 1) * size, count)} / ${count.toLocaleString(getLocale())}`;
+  const next = document.createElement('button'); next.type = 'button'; next.textContent = `${text('next')} →`; next.disabled = (page + 1) * size >= count;
   next.addEventListener('click', () => onChange(page + 1));
   container.append(previous, label, next);
 }
@@ -180,13 +247,13 @@ function emptyRow(text: string): HTMLLIElement {
 }
 
 function renderHistory(): void {
-  $('#operation-count').textContent = operations.length.toLocaleString();
+  $('#operation-count').textContent = operations.length.toLocaleString(getLocale());
   const list = $('#operation-history'); list.replaceChildren();
-  if (operations.length === 0) list.append(emptyRow('操作はまだありません'));
+  if (operations.length === 0) list.append(emptyRow(text('noOperations')));
   for (const [index, operation] of operations.slice(historyPage * historyPageSize, (historyPage + 1) * historyPageSize).entries()) {
     const row = document.createElement('li');
     const number = document.createElement('span'); number.className = 'history-index'; number.textContent = String(historyPage * historyPageSize + index + 1).padStart(2, '0');
-    const action = document.createElement('span'); action.className = `operation-badge ${operation.op}`; action.textContent = operation.op === 'add' ? '追加' : '除外';
+    const action = document.createElement('span'); action.className = `operation-badge ${operation.op}`; action.textContent = text(operation.op);
     const value = document.createElement('code'); value.textContent = operation.value;
     row.append(number, action, value); list.append(row);
   }
@@ -199,7 +266,7 @@ function familyLabel(ip: string): HTMLSpanElement {
 
 function renderCidrs(): void {
   const list = $('#cidr-list'); list.replaceChildren();
-  if (result.cidrs.length === 0) list.append(emptyRow('集合は空です。IPまたはCIDRを追加してください。'));
+  if (result.cidrs.length === 0) list.append(emptyRow(text('emptyCidrs')));
   for (const cidr of result.cidrs.slice(cidrPage * pageSize, (cidrPage + 1) * pageSize)) {
     const row = document.createElement('li'); const value = document.createElement('code'); value.textContent = cidr;
     row.append(value, familyLabel(cidr)); list.append(row);
@@ -209,7 +276,7 @@ function renderCidrs(): void {
 
 function renderRanges(): void {
   const list = $('#range-list'); list.replaceChildren();
-  if (result.ranges.length === 0) list.append(emptyRow('集合に含まれる範囲はありません。'));
+  if (result.ranges.length === 0) list.append(emptyRow(text('emptyRanges')));
   for (const [index, range] of result.ranges.slice(rangePage * pageSize, (rangePage + 1) * pageSize).entries()) {
     const row = document.createElement('li');
     const button = document.createElement('button'); button.type = 'button'; button.className = 'range-row-button';
@@ -228,9 +295,9 @@ function renderResult(): void {
     counter.title = result.addressCount[family];
     counter.classList.toggle('long-number', result.addressCount[family].length > 15);
   }
-  $('#cidr-count').textContent = result.cidrs.length.toLocaleString();
-  $('#cidr-tab-count').textContent = result.cidrs.length.toLocaleString();
-  $('#range-tab-count').textContent = result.ranges.length.toLocaleString();
+  $('#cidr-count').textContent = result.cidrs.length.toLocaleString(getLocale());
+  $('#cidr-tab-count').textContent = result.cidrs.length.toLocaleString(getLocale());
+  $('#range-tab-count').textContent = result.ranges.length.toLocaleString(getLocale());
   renderHistory(); renderCidrs(); renderRanges(); visualization.setResult(result);
 }
 
@@ -283,7 +350,7 @@ $('#zoom-form').addEventListener('submit', async (event) => {
     if (validated.ranges.length === 1) { visualization.zoom(validated.ranges[0], validated.cidrs[0]); setViewButton('custom'); }
   } catch (error) {
     if (current !== zoomGeneration) return;
-    zoomError.textContent = errorDescription(error); zoomError.hidden = false;
+    zoomFailure = error; zoomError.textContent = formatEngineError(error); zoomError.hidden = false;
   }
 });
 
@@ -307,16 +374,16 @@ for (const name of ['cidrs', 'ranges'] as const) {
 }
 
 $('#copy-cidrs').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(result.cidrs.join('\n')); $('#copy-status').textContent = 'CIDR一覧をコピーしました'; }
-  catch { $('#copy-status').textContent = 'コピーできませんでした。一覧から選択してコピーしてください。'; }
+  try { await navigator.clipboard.writeText(result.cidrs.join('\n')); setCopyStatus('copied'); }
+  catch { setCopyStatus('copyFailed'); }
 });
 
 window.addEventListener('pagehide', () => engine.dispose(), { once: true });
-renderResult(); updateControls();
+renderResult(); refreshLocale();
 void engine.ready.then(async () => {
   ready = true; updateControls();
   await evaluate({ initial: inputLines(), operations: [] });
 }).catch((error: unknown) => {
   failed = true; ready = false; showError(error); updateControls();
-  resultStatus.textContent = '計算エンジンを起動できませんでした。ページを再読み込みしてください。';
+  setResultStatus('failed');
 });

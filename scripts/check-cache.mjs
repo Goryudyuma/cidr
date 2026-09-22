@@ -4,10 +4,18 @@ import { randomUUID } from 'node:crypto';
 
 // Check the actual hosting layer: Vite preview does not apply Cloudflare _headers.
 // Run after deploying: node scripts/check-cache.mjs https://cidr.example.com/
+// Pass the deployment directory or its English entry point (/en/, /en/index.html).
+// Both documents are checked; shared assets always resolve from the deployment
+// directory, including when the site is hosted below a path such as /tools/cidr/.
 const argument = process.argv[2];
 if (!argument) throw new Error('Usage: node scripts/check-cache.mjs <deployment URL>');
 const target = new URL(argument);
 assert.ok(['http:', 'https:'].includes(target.protocol), 'Use an HTTP(S) deployment URL.');
+const deployment = new URL(target);
+deployment.search = '';
+deployment.hash = '';
+deployment.pathname = deployment.pathname.replace(/\/en(?:\/index\.html)?\/?$/, '/')
+  .replace(/\/index\.html$/, '/').replace(/\/?$/, '/');
 const report = [];
 
 async function request(url, headers = {}) {
@@ -48,13 +56,15 @@ async function checkResource(url, kind) {
   return { body, url: first.url };
 }
 
-const document = await checkResource(target, 'document');
-const html = document.body.toString('utf8');
-assert.match(html, /<html\b/i, 'The deployment entry point must serve HTML.');
 const assets = new Set();
-for (const match of html.matchAll(/\b(?:src|href)=["']([^"']+)["']/g)) {
-  const url = new URL(match[1], document.url);
-  if (/\.(?:js|css)$/.test(url.pathname) && url.origin === target.origin) assets.add(url.href);
+for (const locale of ['ja', 'en']) {
+  const document = await checkResource(new URL(locale === 'en' ? 'en/' : './', deployment), 'document');
+  const html = document.body.toString('utf8');
+  assert.match(html, new RegExp(`<html\\b[^>]*\\blang=["']${locale}["']`, 'i'), `Expected the ${locale} document.`);
+  for (const match of html.matchAll(/\b(?:src|href)=["']([^"']+)["']/g)) {
+    const url = new URL(match[1], document.url);
+    if (/\.(?:js|css)$/.test(url.pathname) && url.origin === deployment.origin) assets.add(url.href);
+  }
 }
 assert.ok(assets.size > 0, 'The deployed HTML must reference compiled JavaScript/CSS assets.');
 for (const href of assets) {
@@ -71,7 +81,7 @@ for (const href of assets) {
   }
 }
 
-const wasm = await checkResource(new URL('wasm/core.wasm', document.url), 'wasm');
+const wasm = await checkResource(new URL('wasm/core.wasm', deployment), 'wasm');
 assert.deepEqual(wasm.body.subarray(0, 4), Buffer.from([0, 97, 115, 109]), 'Expected an actual Wasm module.');
-await checkResource(new URL('wasm/wasm_exec.js', document.url), 'runtime');
-console.log(JSON.stringify({ url: target.href, resources: report }, null, 2));
+await checkResource(new URL('wasm/wasm_exec.js', deployment), 'runtime');
+console.log(JSON.stringify({ url: deployment.href, resources: report }, null, 2));

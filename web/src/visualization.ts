@@ -1,9 +1,74 @@
 import type { IPRange, Result } from './types';
+import { getLocale, type Locale } from './i18n';
 
 export type Family = 'ipv4' | 'ipv6';
 type NumericRange = { source: IPRange; index: number; start: bigint; end: bigint };
-type Viewport = { start: bigint; end: bigint; label: string };
+type ViewportLabel = { kind: 'custom'; text: string } | { kind: 'fit' | 'selected' };
+type Viewport = { start: bigint; end: bigint; label: ViewportLabel };
 type PrefixBounds = { text: string; family: Family; start: bigint; end: bigint };
+type VisualizationMessages = {
+  detailLabel: string;
+  fitToSet: string;
+  selectedRange: string;
+  rangeCount: (visible: number, total: number) => string;
+  spaceDescription: (family: string) => string;
+  emptySpace: string;
+  emptyViewport: string;
+  rangeDescription: (start: string, end: string, groupSize?: number) => string;
+  rangeTitle: (start: string, end: string, groupSize?: number) => string;
+  detailHint: string;
+  markerHint: string;
+  detailTitle: (family: string, index: number, groupSize?: number) => string;
+  zoomToRange: string;
+  start: string;
+  end: string;
+  relatedCIDRs: (count: number) => string;
+  previous: string;
+  next: string;
+};
+const number = (value: number): string => value.toLocaleString(getLocale() === 'ja' ? 'ja-JP' : 'en-US');
+const messages: Record<Locale, VisualizationMessages> = {
+  ja: {
+    detailLabel: '範囲の詳細',
+    fitToSet: '集合に合わせる',
+    selectedRange: '選択した範囲',
+    rangeCount: (visible, total) => `${number(visible)} / ${number(total)} 範囲`,
+    spaceDescription: (family) => `${family} アドレス空間。帯を選択すると詳細を表示します。`,
+    emptySpace: 'このアドレス空間は空です',
+    emptyViewport: '表示範囲内にアドレスはありません',
+    rangeDescription: (start, end, groupSize) => `${start} から ${end}${groupSize && groupSize > 1 ? `、同じ位置に ${number(groupSize)} 範囲。矢印キーで選択` : ''}`,
+    rangeTitle: (start, end, groupSize) => `${start} – ${end}${groupSize && groupSize > 1 ? ` (${number(groupSize)} 範囲が重なっています。選択後に矢印キーで切り替え)` : ''}`,
+    detailHint: '帯にカーソルを合わせるか、選択すると範囲の詳細を確認できます。',
+    markerHint: '細いマーカーも集合の一部です。同じ位置に重なる範囲は、選択後に矢印キーで切り替えられます。',
+    detailTitle: (family, index, groupSize) => `${family} · 範囲 ${number(index)}${groupSize && groupSize > 1 ? ` · 同じ位置に ${number(groupSize)} 範囲` : ''}`,
+    zoomToRange: 'この範囲を拡大 ↗',
+    start: '開始',
+    end: '終了',
+    relatedCIDRs: (count) => `関連CIDR (${number(count)})`,
+    previous: '前へ',
+    next: '次へ',
+  },
+  en: {
+    detailLabel: 'Range details',
+    fitToSet: 'Fit to set',
+    selectedRange: 'Selected range',
+    rangeCount: (visible, total) => `${number(visible)} / ${number(total)} ${total === 1 ? 'range' : 'ranges'}`,
+    spaceDescription: (family) => `${family} address space. Select a band to view its details.`,
+    emptySpace: 'This address space is empty',
+    emptyViewport: 'No addresses in the visible range',
+    rangeDescription: (start, end, groupSize) => `${start} to ${end}${groupSize && groupSize > 1 ? `, ${number(groupSize)} ranges at the same position. Use the arrow keys to select a range.` : ''}`,
+    rangeTitle: (start, end, groupSize) => `${start} – ${end}${groupSize && groupSize > 1 ? ` (${number(groupSize)} overlapping ranges. Select and use the arrow keys to switch ranges.)` : ''}`,
+    detailHint: 'Hover over or select a band to view the range details.',
+    markerHint: 'Thin markers are also part of the set. Select overlapping ranges and use the arrow keys to switch between them.',
+    detailTitle: (family, index, groupSize) => `${family} · Range ${number(index)}${groupSize && groupSize > 1 ? ` · ${number(groupSize)} ranges at the same position` : ''}`,
+    zoomToRange: 'Zoom to range ↗',
+    start: 'Start',
+    end: 'End',
+    relatedCIDRs: (count) => `Related CIDRs (${number(count)})`,
+    previous: 'Previous',
+    next: 'Next',
+  },
+};
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const WIDTH = 1000;
 const LEFT = 12;
@@ -79,10 +144,14 @@ export class Visualization {
     host.innerHTML = `
       <div id="plot-ipv4" class="family-panel" data-family="ipv4"></div>
       <div id="plot-ipv6" class="family-panel" data-family="ipv6"></div>
-      <div id="range-detail" class="range-detail" aria-label="範囲の詳細"></div>`;
+      <div id="range-detail" class="range-detail"></div>`;
     this.panels = { ipv4: host.querySelector<HTMLElement>('#plot-ipv4')!, ipv6: host.querySelector<HTMLElement>('#plot-ipv6')! };
     this.detail = host.querySelector<HTMLElement>('#range-detail')!;
+    this.detail.setAttribute('aria-label', messages[getLocale()].detailLabel);
   }
+
+  /** Repaint translations without resetting the selection, zoom, or CIDR page. */
+  refreshLocale(): void { this.render(); }
 
   setResult(result: Result): void {
     this.ranges = result.ranges.map((source, index) => ({ source, index, start: addressInteger(source.start), end: addressInteger(source.end) }));
@@ -104,6 +173,10 @@ export class Visualization {
   }
 
   zoom(range: IPRange, label: string): void {
+    this.applyZoom(range, { kind: 'custom', text: label });
+  }
+
+  private applyZoom(range: IPRange, label: ViewportLabel): void {
     this.viewports[range.family] = { start: addressInteger(range.start), end: addressInteger(range.end), label };
     this.onZoom?.();
     this.render();
@@ -120,12 +193,12 @@ export class Visualization {
   private viewport(family: Family, ranges: NumericRange[]): Viewport {
     const custom = this.viewports[family];
     if (custom) return custom;
-    if (this.mode === 'all' || ranges.length === 0) return { start: 0n, end: familyMax[family], label: `${family === 'ipv4' ? '0.0.0.0' : '::'}/0` };
+    if (this.mode === 'all' || ranges.length === 0) return { start: 0n, end: familyMax[family], label: { kind: 'custom', text: `${family === 'ipv4' ? '0.0.0.0' : '::'}/0` } };
     const start = ranges[0].start;
     const end = ranges[ranges.length - 1].end;
     const span = end - start + 1n;
     const margin = span / 20n || 1n;
-    return { start: start > margin ? start - margin : 0n, end: end + margin < familyMax[family] ? end + margin : familyMax[family], label: '集合に合わせる' };
+    return { start: start > margin ? start - margin : 0n, end: end + margin < familyMax[family] ? end + margin : familyMax[family], label: { kind: 'fit' } };
   }
 
   private render(): void {
@@ -135,6 +208,7 @@ export class Visualization {
   }
 
   private renderFamily(family: Family): void {
+    const text = messages[getLocale()];
     const panel = this.panels[family];
     const ranges = this.ranges.filter((range) => range.source.family === family);
     const view = this.viewport(family, ranges);
@@ -146,12 +220,12 @@ export class Visualization {
     heading.innerHTML = `<span class="family-dot ${family}"></span>${family === 'ipv4' ? 'IPv4' : 'IPv6'}`;
     const label = document.createElement('span');
     label.className = 'viewport-label';
-    label.textContent = view.label;
+    label.textContent = view.label.kind === 'custom' ? view.label.text : view.label.kind === 'fit' ? text.fitToSet : text.selectedRange;
     const count = document.createElement('span');
     count.className = 'family-range-count';
-    count.textContent = `${visible.length.toLocaleString()} / ${ranges.length.toLocaleString()} 範囲`;
+    count.textContent = text.rangeCount(visible.length, ranges.length);
     header.append(heading, label, count);
-    const chart = svg('svg', { viewBox: `0 0 ${WIDTH} 84`, class: `range-plot ${family}`, 'aria-label': `${family === 'ipv4' ? 'IPv4' : 'IPv6'} アドレス空間。帯を選択すると詳細を表示します。`, role: 'group' });
+    const chart = svg('svg', { viewBox: `0 0 ${WIDTH} 84`, class: `range-plot ${family}`, 'aria-label': text.spaceDescription(family === 'ipv4' ? 'IPv4' : 'IPv6'), role: 'group' });
     chart.append(svg('rect', { x: String(LEFT), y: '15', width: String(RIGHT - LEFT), height: '38', rx: '5', class: 'plot-track' }));
     for (let index = 0; index <= 8; index++) {
       const x = LEFT + (RIGHT - LEFT) * index / 8;
@@ -178,7 +252,7 @@ export class Visualization {
     for (const [x, group] of tinyGroups) this.addMark(chart, group[0], x, 3, group);
     if (visible.length === 0) {
       const empty = svg('text', { x: '500', y: '39', 'text-anchor': 'middle', class: 'plot-empty' });
-      empty.textContent = ranges.length === 0 ? 'このアドレス空間は空です' : '表示範囲内にアドレスはありません';
+      empty.textContent = ranges.length === 0 ? text.emptySpace : text.emptyViewport;
       chart.append(empty);
     }
     const axis = document.createElement('div');
@@ -192,18 +266,19 @@ export class Visualization {
   }
 
   private addMark(chart: SVGSVGElement, range: NumericRange, x: number, width: number, group?: NumericRange[]): void {
+    const text = messages[getLocale()];
     const first = range.index;
     const last = group?.[group.length - 1].index ?? first;
     const mark = svg('rect', {
       x: String(x), y: width <= 3 ? '11' : '20', width: String(width), height: width <= 3 ? '46' : '28', rx: width <= 3 ? '1' : '3',
       class: `range-band${this.selected !== undefined && this.selected >= first && this.selected <= last ? ' selected' : ''}${group ? ' range-marker' : ''}`,
       role: 'button', tabindex: '0', 'data-range-index': String(range.index),
-      'aria-label': `${range.source.start} から ${range.source.end}${group && group.length > 1 ? `、同じ位置に ${group.length} 範囲。矢印キーで選択` : ''}`,
+      'aria-label': text.rangeDescription(range.source.start, range.source.end, group?.length),
     });
     const title = svg('title', {});
-    title.textContent = `${range.source.start} – ${range.source.end}${group && group.length > 1 ? ` (${group.length} 範囲が重なっています。選択後に矢印キーで切り替え)` : ''}`;
+    title.textContent = text.rangeTitle(range.source.start, range.source.end, group?.length);
     mark.append(title);
-    let groupIndex = 0;
+    let groupIndex = group ? Math.max(0, group.findIndex((item) => item.index === this.selected)) : 0;
     const currentIndex = () => group?.[groupIndex].index ?? first;
     const selectCurrent = () => this.select(currentIndex());
     mark.addEventListener('click', selectCurrent);
@@ -230,26 +305,28 @@ export class Visualization {
   }
 
   private renderDetail(groupSize?: number): void {
+    const text = messages[getLocale()];
     const index = this.hover ?? this.selected;
     const range = index === undefined ? undefined : this.ranges[index];
     this.detail.replaceChildren();
+    this.detail.setAttribute('aria-label', text.detailLabel);
     if (!range) {
-      this.detail.innerHTML = '<span class="detail-symbol" aria-hidden="true">↗</span><p>帯にカーソルを合わせるか、選択すると範囲の詳細を確認できます。<small>細いマーカーも集合の一部です。同じ位置に重なる範囲は、選択後に矢印キーで切り替えられます。</small></p>';
+      this.detail.innerHTML = `<span class="detail-symbol" aria-hidden="true">↗</span><p>${text.detailHint}<small>${text.markerHint}</small></p>`;
       return;
     }
     const title = document.createElement('div');
     title.className = 'detail-title';
     const label = document.createElement('strong');
-    label.textContent = `${range.source.family === 'ipv4' ? 'IPv4' : 'IPv6'} · 範囲 ${range.index + 1}${groupSize && groupSize > 1 ? ` · 同じ位置に ${groupSize} 範囲` : ''}`;
+    label.textContent = text.detailTitle(range.source.family === 'ipv4' ? 'IPv4' : 'IPv6', range.index + 1, groupSize);
     const zoom = document.createElement('button');
     zoom.type = 'button';
     zoom.className = 'text-button';
-    zoom.textContent = 'この範囲を拡大 ↗';
-    zoom.addEventListener('click', () => this.zoom(range.source, '選択した範囲'));
+    zoom.textContent = text.zoomToRange;
+    zoom.addEventListener('click', () => this.applyZoom(range.source, { kind: 'selected' }));
     title.append(label, zoom);
     const bounds = document.createElement('dl');
     bounds.className = 'detail-bounds';
-    for (const [name, value] of [['開始', range.source.start], ['終了', range.source.end]]) {
+    for (const [name, value] of [[text.start, range.source.start], [text.end, range.source.end]]) {
       const dt = document.createElement('dt'); dt.textContent = name;
       const dd = document.createElement('dd'); dd.textContent = value;
       bounds.append(dt, dd);
@@ -273,7 +350,7 @@ export class Visualization {
     const cidrs = document.createElement('div');
     cidrs.className = 'related-cidrs';
     const caption = document.createElement('span');
-    caption.textContent = `関連CIDR (${relatedCount})`;
+    caption.textContent = text.relatedCIDRs(relatedCount);
     cidrs.append(caption);
     const pageSize = 32;
     const maxPage = Math.max(0, Math.ceil(relatedCount / pageSize) - 1);
@@ -282,9 +359,9 @@ export class Visualization {
       const code = document.createElement('code'); code.textContent = prefix.text; cidrs.append(code);
     }
     if (maxPage > 0) {
-      const previous = document.createElement('button'); previous.type = 'button'; previous.textContent = '前へ'; previous.disabled = this.relatedPage === 0;
+      const previous = document.createElement('button'); previous.type = 'button'; previous.textContent = text.previous; previous.disabled = this.relatedPage === 0;
       previous.addEventListener('click', () => { this.relatedPage--; this.renderDetail(); });
-      const next = document.createElement('button'); next.type = 'button'; next.textContent = '次へ'; next.disabled = this.relatedPage === maxPage;
+      const next = document.createElement('button'); next.type = 'button'; next.textContent = text.next; next.disabled = this.relatedPage === maxPage;
       next.addEventListener('click', () => { this.relatedPage++; this.renderDetail(); });
       cidrs.append(previous, document.createTextNode(`${this.relatedPage + 1} / ${maxPage + 1}`), next);
     }
