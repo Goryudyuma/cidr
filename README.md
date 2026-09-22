@@ -15,6 +15,10 @@ IPv4・IPv6の集合を編集するWebツールと、同じGoコアを使うHTTP
 | TypeScript | 5.9.3 |
 | Playwright | 1.58.2 |
 | Wrangler | 4.136.1 |
+| ESLint / typescript-eslint | 10.11.0 / 8.70.1 |
+| Prettier | 3.9.8 |
+| actionlint | 1.7.12 |
+| OSV Scanner / Gitleaks | 2.5.1 / 8.30.1 |
 | go4.org/netipx | v0.0.0-20231129151722-fdeea329fbba |
 
 Go依存は`go.sum`、npm依存は`package-lock.json`で固定しています。ブラウザにはWebAssembly、module Worker、BigIntの対応が必要です。コピー機能にはHTTPSまたはlocalhostが必要です。
@@ -107,11 +111,29 @@ npm run test:cache -- https://cidr.goryudyuma.workers.dev/
 
 | トリガー | 処理 |
 | --- | --- |
-| `main`向けのPull Request | Goのraceテスト・vet・APIビルド、TypeScript検査、Wasmとフロントエンドのビルド、実Chromiumテスト |
+| `main`向けのPull Request | lint・整形・ワークフロー検査、依存関係・秘密情報の検査、Goのraceテスト・vet・APIビルド、TypeScript検査、Wasmとフロントエンドのビルド、実Chromiumテスト |
+| `merge_group` | 同じ検証を実行。将来マージキューを有効にした場合にも対応 |
 | `main`へのpush（PRのマージを含む） | 上記がすべて成功した後、そのビルド成果物を既存の`cidr`へデプロイし、本番のキャッシュを検証 |
 | Actions画面の`Run workflow` | テストを実行。`main`を選んだ場合だけデプロイ |
 
-デプロイ時に再ビルドはしません。テスト済みの`web/dist/`をActionsのartifactで引き継ぎます。同時デプロイを直列化し、古い実行を再試行しても、最新の`main`でなければデプロイをスキップします。PRではCloudflareの認証情報を使用しません。テストのチェック名は`Go, Wasm and browser tests`です。
+デプロイ時に再ビルドはしません。テスト済みの`web/dist/`をActionsのartifactで引き継ぎます。同時デプロイを直列化し、古い実行を再試行しても、最新の`main`でなければデプロイをスキップします。PRではCloudflareの認証情報を使用しません。PRの更新時には古いCIをキャンセルします。
+
+ブランチルールの必須チェック名は`Go, Wasm and browser tests`のままです。このジョブが品質検査・セキュリティ検査・実行テストの結果をまとめ、すべて成功した場合だけ合格します。いずれかが失敗・キャンセル・スキップされた場合は合格せず、デプロイも進みません。
+
+[dev-hato/hato-atamaのCI](https://github.com/dev-hato/hato-atama/tree/master/.github/workflows)を参考に、次の検査と保守処理を加えています。
+
+| 処理 | 内容 |
+| --- | --- |
+| lint・整形 | ESLintでTypeScriptとJavaScript、PrettierでJSON・JSONC・YAML、gofmtでGo、actionlintでActionsの構文と式を検査 |
+| Dependency Review | PRとマージキューで依存の差分を検査。開発用も含め、既知の脆弱性があれば失敗 |
+| OSV Scanner | Goの標準ライブラリ・モジュールとnpmロックファイルを全件検査。既存依存に新しく報告された脆弱性も検出 |
+| Gitleaks | Gitの全履歴を検査。検出した秘密情報はログ上で伏せる |
+| 定期セキュリティ検査 | `.github/workflows/security-scan.yml`で毎週土曜10:15 JSTと手動実行 |
+| キャッシュ整理 | `.github/workflows/cache-cleanup.yml`でPR閉鎖時、毎日06:00 JST、手動実行。閉じたPRのキャッシュだけ削除し、main・通常ブランチ・開いているPRのキャッシュを保持 |
+
+GitHub Actionsは完全なコミットSHA、OSVとGitleaksの配布バイナリはバージョンとSHA256を固定しています。スキャナーを更新するときは`security.yml`のバージョンと公式リリースのSHA256を一緒に更新してください。整形エラーはローカルで修正してコミットします。CIがソースを書き換えることはありません。キャッシュ整理はPRのコードをチェックアウトせず、GitHub APIで閉鎖状態を確認してから削除します。定期実行とPR閉鎖時の処理は、ワークフローをmainへマージした後に有効になります。
+
+Dependabot自身がPRを閉じたときは[トークンの権限制限](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-on-actions)があるため、その場のキャッシュ削除をスキップし、日次実行で回収します。
 
 初回だけ、Cloudflareの[Account API Tokens](https://dash.cloudflare.com/?to=/:account/api-tokens)でデプロイ用トークンを作成し、[このリポジトリのActions secrets](https://github.com/Goryudyuma/cidr/settings/secrets/actions)へ`CLOUDFLARE_API_TOKEN`という名前で登録してください。既存Workerの更新には、対象を`Specified Workers: cidr`、ロールを`Editor`に絞れます。アカウントIDは`wrangler.jsonc`から読み込むため、別のsecretは不要です。ローカルのWrangler OAuthトークンをCIへコピーする必要はありません。詳細は[CloudflareのCI認証](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/)と[Workerごとの権限](https://developers.cloudflare.com/workers/authorization/workers/)を参照してください。
 
@@ -241,6 +263,7 @@ scripts/build-wasm.mjs  Wasmと対応ランタイムの生成
 testdata/evaluate.json  実行環境をまたいで使う共通ケース
 tests/native/         比較用のネイティブGo実行器
 tests/browser/        実ブラウザのWasm・HTTP・UIテスト
+tests/ci/             キャッシュ削除対象の検証
 ```
 
 共通関数は`Evaluate(req Request) (Result, error)`です。JSONの入口は`EvaluateJSON(data []byte)`です。API用には`EvaluateWithLimits(ctx, req, limits)`と`EvaluateJSONWithLimits(ctx, data, limits)`を使います。コアはHTTP、JavaScript、DOMに依存しません。
@@ -250,6 +273,12 @@ WorkerはWasmの関数登録完了を確認してから`ready`を返します。
 ## テスト
 
 ```sh
+npm run lint
+npm run format:check
+# JSON・JSONC・YAMLの整形を修正する場合
+npm run format
+
+node --test tests/ci/*.test.mjs
 go test -race ./...
 go vet ./...
 npm run typecheck
@@ -263,6 +292,10 @@ npm run test:browser
 
 # Goとブラウザのテストをまとめて実行
 npm test
+
+# CIと同じActions検査
+go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+"$(go env GOPATH)/bin/actionlint"
 ```
 
 共通のJSONケースについて、ネイティブGoを実行した結果、実HTTPサーバーの結果、本番ビルドのWorker内で動くWasmの結果を比較します。WorkerとWasmはモックしません。Goのランダムテストでは各ファミリー256アドレスの小空間に限って単純な参照集合を列挙し、結果集合、重複の不在、最小化を確認します。IPを列挙するのはこのテスト内だけです。

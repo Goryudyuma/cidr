@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
   workflow_dispatch:
@@ -10,18 +12,66 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: cidr-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+
 defaults:
   run:
     shell: bash
 
 jobs:
+  quality:
+    name: Lint and format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache-dependency-path: go.sum
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Set up pinned npm
+        run: npm install --global npm@11.5.1
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint TypeScript and JavaScript
+        run: npm run lint
+      - name: Check JSON and YAML formatting
+        run: npm run format:check
+      - name: Check Go formatting
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted"
+            echo '::error::Run gofmt on the files listed above.'
+            exit 1
+          fi
+      - name: Check workflow syntax and expressions
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint"
+      - name: Test CI maintenance logic
+        run: node --test tests/ci/*.test.mjs
+
+  security:
+    name: Security
+    uses: ./.github/workflows/security.yml
+
   test:
-    name: Go, Wasm and browser tests
+    name: Build and runtime tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    concurrency:
-      group: cidr-test-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: true
     env:
       CI: "true"
     steps:
@@ -75,9 +125,24 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  checks:
+    # Keep the existing ruleset's required check name stable.
+    name: Go, Wasm and browser tests
+    needs: [quality, security, test]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every check to succeed
+        env:
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s\n' "$CHECK_RESULTS"
+          jq --exit-status 'length > 0 and all(.[]; .result == "success")' <<< "$CHECK_RESULTS"
+
   deploy:
     name: Deploy frontend to Cloudflare
-    needs: test
+    needs: checks
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

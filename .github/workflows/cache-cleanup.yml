@@ -1,0 +1,80 @@
+name: Clean up closed PR caches
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+  schedule:
+    - cron: "0 21 * * *" # 06:00 JST
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: cidr-cache-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Remove caches belonging to closed pull requests
+    # Dependabot's own close events have a read-only token; the daily run cleans those caches.
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name != 'pull_request_target' || github.actor != 'dependabot[bot]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # No checkout: the privileged workflow never loads or executes PR code.
+      - name: Delete closed PR caches
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            let targetPullNumber;
+            if (context.eventName === 'pull_request_target') {
+              targetPullNumber = context.payload.pull_request?.number;
+              if (context.payload.action !== 'closed' ||
+                  !Number.isSafeInteger(targetPullNumber) || targetPullNumber < 1) {
+                throw new Error('Expected a closed pull request with a valid number.');
+              }
+            }
+
+            const caches = await github.paginate(github.rest.actions.getActionsCacheList, {
+              owner, repo, per_page: 100,
+            });
+            const closedPulls = new Map();
+            let deleted = 0;
+            for (const cache of caches) {
+              const match = /^refs\/pull\/([1-9]\d*)\/(?:merge|head)$/.exec(cache.ref ?? '');
+              if (!match) continue;
+              const pullNumber = Number(match[1]);
+              if (!Number.isSafeInteger(pullNumber) ||
+                  (targetPullNumber !== undefined && pullNumber !== targetPullNumber)) continue;
+
+              if (!closedPulls.has(pullNumber)) {
+                try {
+                  const { data: pull } = await github.rest.pulls.get({
+                    owner, repo, pull_number: pullNumber,
+                  });
+                  closedPulls.set(pullNumber, pull.state === 'closed');
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  closedPulls.set(pullNumber, false);
+                  core.info(`Skipping caches for unavailable PR #${pullNumber}.`);
+                }
+              }
+              if (!closedPulls.get(pullNumber)) continue;
+
+              try {
+                await github.rest.actions.deleteActionsCacheById({
+                  owner, repo, cache_id: cache.id,
+                });
+                deleted += 1;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                core.info(`Cache ${cache.id} was already deleted.`);
+              }
+            }
+            core.info(`Deleted ${deleted} closed PR caches.`);

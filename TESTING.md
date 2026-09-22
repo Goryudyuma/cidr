@@ -81,3 +81,16 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/cidr-playwright-browsers \
 ```
 
 CIはPRとmainへのpushで同じ検証を行います。mainで合格した成果物だけをデプロイし、公開後にキャッシュ検査を実行します。自動デプロイの利用には、READMEに記載したActions secretの登録が必要です。
+
+## 参照CIから追加した検査
+
+2026年9月22日、`dev-hato/hato-atama`のワークフローを参考に品質・セキュリティ・キャッシュ保守の検査を追加しました。
+
+- ESLint、Prettier、gofmt、actionlint 1.7.12の検査が成功
+- キャッシュ削除スクリプトを実行する7件のNodeテストが成功。main・通常ブランチ・開いているPRの保持、閉じたPRの選別、削除競合、APIエラーを検証
+- OSV Scanner 2.5.1でGoとnpmの全ロック依存を検査し、既知の脆弱性0件
+- Gitleaks 8.30.1でGitの全履歴を検査し、秘密情報の検出0件
+- Goのraceテスト・vet、APIビルド、Wasmとフロントエンドのビルドが成功
+- 実Chromiumの11テストが成功。37ケースでネイティブGo・HTTP・Wasmの一致を再確認
+
+キャッシュ削除APIのテストではGitHub APIを置き換え、実際のリモートキャッシュは削除していません。定期実行・PR閉鎖時のキャッシュ整理は、ワークフローをmainへマージした後に動作します。

@@ -1,0 +1,17 @@
+name: Scheduled security scan
+
+on:
+  schedule:
+    - cron: "15 1 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    uses: ./.github/workflows/security.yml
