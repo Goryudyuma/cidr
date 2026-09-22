@@ -4,6 +4,8 @@ IPv4・IPv6の集合を編集するWebツールと、同じGoコアを使うHTTP
 
 ブラウザの計算はWeb Worker内のGo WebAssemblyで行います。静的ファイルの読み込み後は、通信を切っても編集・計算・ズームを使えます。入力をHTTP APIに送信しません。編集内容はメモリ内だけに保持し、再読み込みすると初期状態に戻ります。
 
+日本語版は`/`、英語版は`/en/`です。画面上部の「日本語 / English」で切り替えます。言語を切り替えても、入力途中の内容・集合・操作履歴・ズーム・選択範囲・一覧のページ位置を保持します。切り替えに通信やページの再読み込みは必要ありません。URLで表示言語が決まるため、英語版へのリンクを共有したり、直接開いたりできます。
+
 ## 必要な環境
 
 | ツール | 固定バージョン |
@@ -67,6 +69,8 @@ npm run wasm
 
 フロントエンドは`web/dist/`の全ファイルを静的ホスティングへ配置します。相対パスでビルドするため、ドメイン直下とサブディレクトリの両方で使えます。サブディレクトリのURLには末尾の`/`を付けてください。JavaScriptを適切なMIMEタイプで配信してください。Wasmは`application/wasm`を推奨しますが、`application/octet-stream`でも読み込めます。
 
+ビルドでは日本語の`index.html`と英語の`en/index.html`を生成します。両ページで同じJavaScript・CSS・Worker・Wasmを共有します。ホスティング先は`/en/`を`en/index.html`として配信してください。サブディレクトリに置く場合は、例えば`/tools/cidr/`と`/tools/cidr/en/`で利用できます。
+
 APIはGoバイナリだけを別ホスト・別ポートで実行できます。Node.js、Wasm、静的ファイルは不要です。公開する場合は、必要に応じてHTTPSを終端するリバースプロキシの後ろに置いてください。APIの公開先をUIに設定する必要はありません。
 
 CORSは既定で無効です。別のWebアプリからAPIを呼ぶ場合だけ、許可するオリジンを列挙します。
@@ -81,7 +85,7 @@ CORSは既定で無効です。別のWebアプリからAPIを呼ぶ場合だけ�
 
 ## Cloudflare Workersへのデプロイ
 
-公開先: [cidr.goryudyuma.workers.dev](https://cidr.goryudyuma.workers.dev/)
+公開先: [日本語](https://cidr.goryudyuma.workers.dev/) / [English](https://cidr.goryudyuma.workers.dev/en/)
 
 既存のWorkersプロジェクト`cidr`には、`wrangler.jsonc`で指定した`web/dist/`をStatic Assetsとして配信します。Cloudflare側でWasmを実行せず、ブラウザに読み込んで実行します。この配信にはネイティブGo APIを含めません。
 
@@ -149,13 +153,13 @@ Dependabot自身がPRを閉じたときは[トークンの権限制限](https://
 
 | ファイル | キャッシュと更新 |
 | --- | --- |
-| HTML | `max-age=0, must-revalidate, no-transform`。アクセス時にETagで確認し、同じ内容なら本文なしの304、変わっていれば200で取得 |
+| 日本語・英語のHTML | `max-age=0, must-revalidate, no-transform`。アクセス時にETagで確認し、同じ内容なら本文なしの304、変わっていれば200で取得 |
 | 固定名の`/wasm/*` | `max-age=0, must-revalidate`。Wasmと対応するGoランタイムを再検証 |
 | ハッシュ付きの`/assets/*` | `max-age=31536000, immutable`。有効なキャッシュがあれば通信せず使用。内容が変わるとURLも変わるため、新しいHTMLから新しいファイルを取得 |
 
 304はキャッシュ済みのETagを付けた条件付きリクエストへの応答です。初回やキャッシュ削除後は200になり、新しいデプロイでも内容が同じファイルは再ダウンロードしません。開いたままの画面を自動で再読み込みすることはなく、次回アクセス・再読み込みで更新を確認します。`no-transform`はCloudflareによるHTML変換でETagが除去されるのを防ぎます。
 
-`scripts/check-cache.mjs`はHTML、JavaScript、CSS、Worker、Wasm、Goランタイムについて、実際のHTTP応答を確認します。一致するETagで304と空本文、不一致のETagで200と現在の本文になることを検証します。Vite previewにはCloudflareの`_headers`が適用されないため、公開URLを対象に実行してください。
+`scripts/check-cache.mjs`は日本語・英語のHTML、JavaScript、CSS、Worker、Wasm、Goランタイムについて、実際のHTTP応答を確認します。一致するETagで304と空本文、不一致のETagで200と現在の本文になることを検証します。Vite previewにはCloudflareの`_headers`が適用されないため、公開URLを対象に実行してください。
 
 ## 画面の使い方
 
@@ -261,6 +265,7 @@ cmd/wasm/             syscall/jsとコアの橋渡し
 cmd/api/              ネイティブHTTPサーバー
 internal/httpapi/     エンドポイント・制限・CORS・テスト
 web/src/              TypeScript UI・SVG・Worker・通信
+web/en/index.html     英語ページの静的エントリーポイント
 scripts/build-wasm.mjs  Wasmと対応ランタイムの生成
 testdata/evaluate.json  実行環境をまたいで使う共通ケース
 tests/native/         比較用のネイティブGo実行器
@@ -303,6 +308,8 @@ go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 共通のJSONケースについて、ネイティブGoを実行した結果、実HTTPサーバーの結果、本番ビルドのWorker内で動くWasmの結果を比較します。WorkerとWasmはモックしません。Goのランダムテストでは各ファミリー256アドレスの小空間に限って単純な参照集合を列挙し、結果集合、重複の不在、最小化を確認します。IPを列挙するのはこのテスト内だけです。
 
 ブラウザではオフライン編集、追加・除外・リセット・コピー、エラー時の状態保持、IPv6の下位ビットを保つズーム、細い範囲のマーカー、古い応答の破棄、旧上限を超える入力、モバイル表示も確認します。実行結果は[TESTING.md](TESTING.md)に記録しています。
+
+英語ページでは直接アクセス・再読み込み、英語の操作・エラー・読み上げ用ラベル、オフラインの言語切替とブラウザ履歴、320px・390px幅でのIPv6表示を検証します。表示文言はTypeScriptの辞書で管理し、GoコアやAPIの計算・検証ルールは両言語で共通です。
 
 ## 参照
 
