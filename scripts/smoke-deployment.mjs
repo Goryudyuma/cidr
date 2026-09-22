@@ -27,6 +27,7 @@ for (const path of ['wasm/core.wasm', 'wasm/wasm_exec.js']) {
 const browser = await chromium.launch();
 try {
   const context = await browser.newContext();
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: deployment.origin });
   const page = await context.newPage();
   const errors = [];
   const requests = [];
@@ -111,9 +112,62 @@ try {
   await page.locator('#add-operation').click();
   await expect(page.locator('#count-ipv4')).toHaveText('6');
   await expect(page.locator('#count-ipv6')).toHaveText('1');
+  await page.locator('#zoom-submit').click();
+  await expect(page.locator('#plot-ipv4 .viewport-label')).toHaveText('192.0.2.0/24');
+  await page.locator('#initial-input').fill(draftInitial);
+  await page.locator('#operation-input').fill('203.0.113.77');
+  await page.locator('#zoom-input').fill('2001:db8::/120');
+  await page.locator('#tab-ranges').click();
+  const sharedCIDRs = await page.locator('#cidr-list code').allTextContents();
+  const sharedHistory = await page.locator('#operation-history li').allTextContents();
+  await page.locator('#copy-share').click();
+  await expect(page.locator('#share-status')).toContainText('Share link copied');
+  const shareLink = await page.evaluate(() => navigator.clipboard.readText());
+  const sharedURL = new URL(shareLink);
+  assert.equal(sharedURL.origin, deployment.origin);
+  assert.equal(sharedURL.pathname, english.pathname);
+  assert.match(sharedURL.hash, /^#s=1\.[A-Za-z0-9_-]+$/);
   assert.deepEqual(requests, [], 'Offline calculation must not make network requests.');
+
+  // Use a fresh, online browser context: restoration must load its own real
+  // Worker and Wasm instead of relying on the source page's in-memory state.
+  const restoreContext = await browser.newContext();
+  try {
+    const restoredRequests = [];
+    restoreContext.on('request', (request) => {
+      requests.push(request.url());
+      restoredRequests.push({ url: request.url(), referer: request.headers().referer });
+    });
+    const restored = await restoreContext.newPage();
+    restored.on('pageerror', (error) => errors.push(error.message));
+    await restored.goto(shareLink, { waitUntil: 'networkidle', timeout: 60_000 });
+    await expect(restored.locator('#engine-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
+    await expect(restored.locator('#share-status')).toHaveText('Shared contents restored.');
+    await expect(restored.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(restored.locator('#count-ipv4')).toHaveText('6');
+    await expect(restored.locator('#count-ipv6')).toHaveText('1');
+    await expect(restored.locator('#cidr-list code')).toHaveText(sharedCIDRs);
+    await expect(restored.locator('#operation-history li')).toHaveText(sharedHistory);
+    await expect(restored.locator('#initial-input')).toHaveValue(draftInitial);
+    await expect(restored.locator('#operation-input')).toHaveValue('203.0.113.77');
+    await expect(restored.locator('#zoom-input')).toHaveValue('2001:db8::/120');
+    await expect(restored.locator('#plot-ipv4 .viewport-label')).toHaveText('192.0.2.0/24');
+    await expect(restored.locator('#tab-ranges')).toHaveAttribute('aria-selected', 'true');
+    await expect(restored.locator('#draft-status')).not.toBeEmpty();
+    await expect(restored.locator('#add-operation')).toBeDisabled();
+    assert.ok(restoredRequests.some(({ url }) => new URL(url).pathname === new URL('wasm/core.wasm', deployment).pathname),
+      'The shared page must load the actual Go Wasm module.');
+    assert.ok(restoredRequests.some(({ url }) => new URL(url).pathname === new URL(`assets/${workerFile}`, deployment).pathname),
+      'The shared page must load the compiled calculation Worker.');
+    for (const request of restoredRequests) {
+      assert.equal(new URL(request.url).hash, '', 'A shared fragment must not enter HTTP requests.');
+      assert.equal(request.referer ? new URL(request.referer).hash : '', '', 'A shared fragment must not enter Referer headers.');
+    }
+  } finally { await restoreContext.close(); }
+  assert.equal(requests.some((url) => /\/api\//.test(new URL(url).pathname)), false, 'Sharing must not use a calculation HTTP API.');
   assert.deepEqual(errors, [], 'Browser runtime errors.');
   console.log(JSON.stringify({ url: deployment.href, fixtures: fixtures.length, matchingWasmRuntime: true,
     englishDirectAccess: true, offlineEditing: true, offlineLanguageSwitch: true, preservedEdits: true,
+    offlineShareLink: true, sharedStateRestored: true,
     screenshots: ['test-results/production-ja.png', 'test-results/production-en.png'], browserErrors: errors }, null, 2));
 } finally { await browser.close(); }

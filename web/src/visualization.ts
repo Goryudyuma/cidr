@@ -1,10 +1,12 @@
 import type { IPRange, Result } from './types';
 import { getLocale, type Locale } from './i18n';
+import type { SharedView } from './share';
 
 export type Family = 'ipv4' | 'ipv6';
 type NumericRange = { source: IPRange; index: number; start: bigint; end: bigint };
-type ViewportLabel = { kind: 'custom'; text: string } | { kind: 'fit' | 'selected' };
-type Viewport = { start: bigint; end: bigint; label: ViewportLabel };
+type ViewportLabel = { kind: 'custom'; text: string } | { kind: 'selected' };
+type Viewport = { start: bigint; end: bigint; label: ViewportLabel | { kind: 'fit' } };
+type ZoomViewport = Viewport & { label: ViewportLabel };
 type PrefixBounds = { text: string; family: Family; start: bigint; end: bigint };
 type VisualizationMessages = {
   detailLabel: string;
@@ -131,7 +133,7 @@ function svg<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<st
 export class Visualization {
   private ranges: NumericRange[] = [];
   private prefixes: Record<Family, PrefixBounds[]> = { ipv4: [], ipv6: [] };
-  private viewports: Partial<Record<Family, Viewport>> = {};
+  private viewports: Partial<Record<Family, ZoomViewport>> = {};
   private mode: 'fit' | 'all' = 'fit';
   private selected: number | undefined;
   private hover: number | undefined;
@@ -152,6 +154,50 @@ export class Visualization {
 
   /** Repaint translations without resetting the selection, zoom, or CIDR page. */
   refreshLocale(): void { this.render(); }
+
+  exportView(): SharedView {
+    const viewports: SharedView['viewports'] = {};
+    for (const family of ['ipv4', 'ipv6'] as const) {
+      const view = this.viewports[family];
+      if (view) {
+        viewports[family] = {
+          start: view.start.toString(),
+          end: view.end.toString(),
+          label: { ...view.label },
+        };
+      }
+    }
+    return {
+      mode: this.mode,
+      viewports,
+      ...(this.selected === undefined ? {} : { selected: this.selected }),
+      relatedPage: this.relatedPage,
+    };
+  }
+
+  /** Restore decoded view data after setResult has supplied the recomputed set. */
+  restoreView(state: SharedView): void {
+    const viewports: Partial<Record<Family, ZoomViewport>> = {};
+    for (const family of ['ipv4', 'ipv6'] as const) {
+      const view = state.viewports[family];
+      if (view) {
+        viewports[family] = {
+          start: BigInt(view.start),
+          end: BigInt(view.end),
+          label: { ...view.label },
+        };
+      }
+    }
+    this.mode = state.mode;
+    this.viewports = viewports;
+    const selected = state.selected;
+    this.selected = selected !== undefined && Number.isSafeInteger(selected) && selected >= 0 && selected < this.ranges.length
+      ? selected : undefined;
+    this.hover = undefined;
+    this.relatedPage = this.selected !== undefined && Number.isSafeInteger(state.relatedPage)
+      ? Math.max(0, state.relatedPage) : 0;
+    this.render();
+  }
 
   setResult(result: Result): void {
     this.ranges = result.ranges.map((source, index) => ({ source, index, start: addressInteger(source.start), end: addressInteger(source.end) }));
