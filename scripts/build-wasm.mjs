@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const expectedNode = (await readFile(join(root, '.nvmrc'), 'utf8')).trim();
+if (process.version !== `v${expectedNode}`) throw new Error(`Node.js ${expectedNode} is required to build; found ${process.version}.`);
 const expected = (await readFile(join(root, '.go-version'), 'utf8')).trim();
 const runGo = (args, options = {}) => execFileSync('go', args, { cwd: root, encoding: 'utf8', ...options });
 async function copyAsset(source, destination) {

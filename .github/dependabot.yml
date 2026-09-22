@@ -1,5 +1,7 @@
 version: 2
 
+# npm's engine-strict is disabled so Dependabot can use its managed runtime;
+# CI validates each update on the project's pinned Node.js and npm versions.
 updates:
   - package-ecosystem: npm
     directory: /

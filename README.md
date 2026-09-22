@@ -19,6 +19,8 @@ IPv4・IPv6の集合を編集するWebツールと、同じGoコアを使うHTTP
 
 Go依存は`go.sum`、npm依存は`package-lock.json`で固定しています。ブラウザにはWebAssembly、module Worker、BigIntの対応が必要です。コピー機能にはHTTPSまたはlocalhostが必要です。
 
+Dependabotは独自のNode/npmでロックファイルを更新するため、`npm install`時の`engine-strict`は無効にしています。ビルドスクリプトでは`.nvmrc`のNode.jsと`.go-version`のGoを検査し、CIも表のバージョンで更新後の依存を検証します。
+
 ## 起動とビルド
 
 リポジトリのルートで実行します。

@@ -58,7 +58,7 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/cidr-playwright-browsers npm test
 
 ## 未実施の確認
 
-Safari・Firefox、Windows・Linuxでの実行、長時間の負荷試験は行っていません。APIの最大出力100万CIDRを同時4リクエストで生成するような最大負荷の計測も行っていません。環境ごとのメモリと処理能力に合わせて、APIの上限と同時実行数を調整してください。
+Safari・Firefox、Windowsでの実行、長時間の負荷試験は行っていません。APIの最大出力100万CIDRを同時4リクエストで生成するような最大負荷の計測も行っていません。環境ごとのメモリと処理能力に合わせて、APIの上限と同時実行数を調整してください。
 
 ## CI・Dependabot・キャッシュの追加確認
 
@@ -67,6 +67,8 @@ Safari・Firefox、Windows・Linuxでの実行、長時間の負荷試験は行�
 - `go test -race ./...`、`go vet ./...`、APIビルド、Wasm・フロントエンドのビルドが成功
 - 実Chromiumの11テストが成功。37件の共通データでネイティブGo・HTTP・Wasmの一致を再確認
 - GitHub Actionsワークフローをactionlint 1.7.12で検査し、エラーなし。ワークフローとDependabot設定のYAML解析も成功
+- [GitHub ActionsのUbuntu 24.04上のテスト](https://github.com/Goryudyuma/cidr/actions/runs/35684628148/job/106608715718)も成功。依存のインストールからGoのraceテスト・vet・APIビルド・Wasmとフロントエンドのビルド・実Chromiumテスト・成果物の保存まで完了
+- Dependabot初回実行で、npmの`engine-strict`とDependabot自身のNode/npmバージョンが衝突する問題を確認。インストール時の厳密一致を外し、Nodeのバージョン検査をビルド時へ移動。CIのNode/npm固定は維持
 - HTMLに`no-transform`付き再検証ヘッダーを追加し、既存のCloudflare `cidr`へ反映。バージョンIDは`d1335c79-592b-4d6b-95fc-27c3709eb5b9`
 - 公開URLでHTML、JavaScript、CSS、Worker、Wasm、Goランタイムの6リソースを検査。一致するETagでは304と空本文、不一致のETagでは200と現在の本文を確認
 - ローカルの実Wrangler配信でも同じキャッシュ検査が成功。HTMLファイルを変更した後、変更前のETagでリクエストすると新しいETagと本文を200で取得
