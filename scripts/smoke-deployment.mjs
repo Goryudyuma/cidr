@@ -87,7 +87,11 @@ try {
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#add-operation').click();
   await expect(page.locator('#count-ipv4')).toHaveText('6');
-  const appliedInitial = await page.locator('#initial-input').inputValue();
+  // Formatting-only edits are semantically equal to the applied set, but the
+  // shared editor must still preserve the exact text instead of reconstructing it.
+  const appliedInitial = '\n \t192.0.2.0/30 \t\n\n 192.0.2.4/30  \n';
+  await page.locator('#initial-input').fill(appliedInitial);
+  await expect(page.locator('#draft-status')).toBeEmpty();
   const draftInitial = `${appliedInitial}\n203.0.113.9`;
   await page.locator('#initial-input').fill(draftInitial);
   await page.locator('#operation-input').fill('2001:db8::1');
@@ -114,6 +118,15 @@ try {
   await expect(page.locator('#count-ipv6')).toHaveText('1');
   await page.locator('#zoom-submit').click();
   await expect(page.locator('#plot-ipv4 .viewport-label')).toHaveText('192.0.2.0/24');
+  await expect(page.locator('#initial-input')).toHaveValue(appliedInitial);
+  await expect(page.locator('#draft-status')).toBeEmpty();
+  await page.locator('#copy-share').click();
+  await expect(page.locator('#share-status')).toContainText('Share link copied');
+  const formattedShareLink = await page.evaluate(() => navigator.clipboard.readText());
+  const formattedURL = new URL(formattedShareLink);
+  assert.equal(formattedURL.origin, deployment.origin);
+  assert.equal(formattedURL.pathname, english.pathname);
+  assert.match(formattedURL.hash, /^#s=2\.[gb]\.[A-Za-z0-9_-]+$/);
   await page.locator('#initial-input').fill(draftInitial);
   await page.locator('#operation-input').fill('203.0.113.77');
   await page.locator('#zoom-input').fill('2001:db8::/120');
@@ -126,7 +139,7 @@ try {
   const sharedURL = new URL(shareLink);
   assert.equal(sharedURL.origin, deployment.origin);
   assert.equal(sharedURL.pathname, english.pathname);
-  assert.match(sharedURL.hash, /^#s=1\.[A-Za-z0-9_-]+$/);
+  assert.match(sharedURL.hash, /^#s=2\.[gb]\.[A-Za-z0-9_-]+$/);
   assert.deepEqual(requests, [], 'Offline calculation must not make network requests.');
 
   // Use a fresh, online browser context: restoration must load its own real
@@ -140,6 +153,26 @@ try {
     });
     const restored = await restoreContext.newPage();
     restored.on('pageerror', (error) => errors.push(error.message));
+    await restored.goto(formattedShareLink, { waitUntil: 'networkidle', timeout: 60_000 });
+    await expect(restored.locator('#engine-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
+    await expect(restored.locator('#share-status')).toHaveText('Shared contents restored.');
+    await expect(restored.locator('#initial-input')).toHaveValue(appliedInitial);
+    await expect(restored.locator('#draft-status')).toBeEmpty();
+    await expect(restored.locator('#count-ipv4')).toHaveText('6');
+    await expect(restored.locator('#count-ipv6')).toHaveText('1');
+    await expect(restored.locator('#cidr-list code')).toHaveText(sharedCIDRs);
+    await expect(restored.locator('#operation-history li')).toHaveText(sharedHistory);
+    await expect(restored.locator('#operation-count')).toHaveText('4');
+    await expect(restored.locator('#operation-input')).toHaveValue('');
+    await expect(restored.locator('#zoom-input')).toHaveValue('192.0.2.0/24');
+    await restored.locator('#operation-input').fill('192.0.2.3');
+    await expect(restored.locator('#remove-operation')).toBeEnabled();
+    await restored.locator('#remove-operation').click();
+    await expect(restored.locator('#count-ipv4')).toHaveText('5');
+    await expect(restored.locator('#count-ipv6')).toHaveText('1');
+    await expect(restored.locator('#operation-count')).toHaveText('5');
+    await expect(restored.locator('#initial-input')).toHaveValue(appliedInitial);
+
     await restored.goto(shareLink, { waitUntil: 'networkidle', timeout: 60_000 });
     await expect(restored.locator('#engine-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
     await expect(restored.locator('#share-status')).toHaveText('Shared contents restored.');
@@ -168,6 +201,6 @@ try {
   assert.deepEqual(errors, [], 'Browser runtime errors.');
   console.log(JSON.stringify({ url: deployment.href, fixtures: fixtures.length, matchingWasmRuntime: true,
     englishDirectAccess: true, offlineEditing: true, offlineLanguageSwitch: true, preservedEdits: true,
-    offlineShareLink: true, sharedStateRestored: true,
+    offlineShareLink: true, sharedStateRestored: true, sharedInputFormattingPreserved: true,
     screenshots: ['test-results/production-ja.png', 'test-results/production-en.png'], browserErrors: errors }, null, 2));
 } finally { await browser.close(); }

@@ -1,5 +1,6 @@
-import type { EvaluationError, Request, Result, WorkerRequest, WorkerResponse } from './types';
+import type { EvaluationError, Request, Result, ShareReply, WorkerRequest, WorkerResponse } from './types';
 import { assetURL, getLocale } from './i18n';
+import { ShareError, type SharedState } from './share';
 
 const workerMessages: Record<string, { en: string; ja: string }> = {
   wasm_unavailable: { en: 'Unable to initialize or run Wasm', ja: 'Wasmを初期化・実行できませんでした' },
@@ -59,6 +60,7 @@ export class Engine {
   private worker?: Worker;
   private nextID = 0;
   private pending = new Map<number, { resolve: (result: Result) => void; reject: (error: Error) => void }>();
+  private sharePending = new Map<number, { resolve: (result: ShareReply) => void; reject: (error: Error) => void }>();
   private failure?: Error;
   private resolveReady!: () => void;
   private rejectReady!: (error: Error) => void;
@@ -85,6 +87,14 @@ export class Engine {
         this.resolveReady();
       } else if (data.type === 'fatal') {
         this.fail(new EngineError(data.error));
+      } else if (data.type === 'share-result') {
+        const pending = this.sharePending.get(data.id);
+        if (!pending) return;
+        this.sharePending.delete(data.id);
+        if (data.error) {
+          const code = data.error.code === 'unsupported' || data.error.code === 'tooLarge' ? data.error.code : 'invalid';
+          pending.reject(new ShareError(code, data.error.message, data.error.field));
+        } else pending.resolve(data.result);
       } else {
         const pending = this.pending.get(data.id);
         if (!pending) return;
@@ -112,13 +122,40 @@ export class Engine {
   async evaluate(request: Request): Promise<Result> {
     await this.ready;
     if (this.failure) throw this.failure;
-    if (this.pending.size >= 64) throw workerError('worker_busy');
+    if (this.pending.size + this.sharePending.size >= 64) throw workerError('worker_busy');
     const id = ++this.nextID;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       try { this.send({ type: 'evaluate', id, request }); }
       catch (error) {
         this.pending.delete(id);
+        reject(error instanceof EngineError ? error : workerError('worker_send_failed', error));
+      }
+    });
+  }
+
+  async shareEncode(state: SharedState): Promise<string> {
+    const result = await this.shareRequest({ type: 'share-encode', state });
+    if (result.kind !== 'encode') throw workerError('worker_message_error');
+    return result.hash;
+  }
+
+  async shareDecode(hash: string): Promise<SharedState | null> {
+    const result = await this.shareRequest({ type: 'share-decode', hash });
+    if (result.kind !== 'decode') throw workerError('worker_message_error');
+    return result.state;
+  }
+
+  private async shareRequest(request: { type: 'share-encode'; state: SharedState } | { type: 'share-decode'; hash: string }): Promise<ShareReply> {
+    await this.ready;
+    if (this.failure) throw this.failure;
+    if (this.pending.size + this.sharePending.size >= 64) throw workerError('worker_busy');
+    const id = ++this.nextID;
+    return new Promise((resolve, reject) => {
+      this.sharePending.set(id, { resolve, reject });
+      try { this.send({ ...request, id }); }
+      catch (error) {
+        this.sharePending.delete(id);
         reject(error instanceof EngineError ? error : workerError('worker_send_failed', error));
       }
     });
@@ -138,6 +175,8 @@ export class Engine {
     this.rejectReady(error);
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    for (const pending of this.sharePending.values()) pending.reject(error);
+    this.sharePending.clear();
     this.worker?.terminate();
   }
 }

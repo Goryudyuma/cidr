@@ -20,10 +20,29 @@ export interface SharedState {
 }
 
 export const MAX_SHARE_HASH_LENGTH = 32_768;
-export const MAX_SHARE_STATE_BYTES = 1024 * 1024;
-const PREFIX = '#s=1.';
-const MAX_COMPRESSED_BYTES = Math.floor((MAX_SHARE_HASH_LENGTH - PREFIX.length) * 3 / 4);
+export const MAX_SHARE_STATE_BYTES = 16 * 1024 * 1024;
+export const MAX_SHARE_WIRE_BYTES = 8 * 1024 * 1024;
+const VERSION = 2;
+const MAX_COMPRESSED_BYTES = Math.floor((MAX_SHARE_HASH_LENGTH - '#s=2.g.'.length) * 3 / 4);
 const familyMax: Record<Family, bigint> = { ipv4: (1n << 32n) - 1n, ipv6: (1n << 128n) - 1n };
+
+export type ShareCodec = 'g' | 'b';
+export interface ShareCompression {
+  compress(data: Uint8Array): { codec: ShareCodec; data: Uint8Array } | Promise<{ codec: ShareCodec; data: Uint8Array }>;
+  // The adapter must enforce MAX_SHARE_WIRE_BYTES while decompressing, rather
+  // than buffering an unbounded result and relying on the subsequent check.
+  decompress(codec: ShareCodec, data: Uint8Array): Uint8Array | Promise<Uint8Array>;
+}
+
+type InitialInput = string | [prefixChars: number, suffixChars: number, middle: string];
+interface SharedWireV2 {
+  version: 2;
+  initial: string[];
+  operations: [0 | 1, string][];
+  inputs: [InitialInput, string, string];
+  view: SharedView;
+  output: SharedState['output'];
+}
 
 export class ShareError extends Error {
   readonly code: 'invalid' | 'unsupported' | 'tooLarge';
@@ -42,6 +61,10 @@ export class ShareError extends Error {
 
 function invalid(field: string): never {
   throw new ShareError('invalid', `Invalid shared state field: ${field}.`, field);
+}
+
+function tooLarge(field: 'share.url' | 'share.state'): never {
+  throw new ShareError('tooLarge', undefined, field);
 }
 
 function record(value: unknown, field: string, required: string[], optional: string[] = []): Record<string, unknown> {
@@ -63,6 +86,19 @@ function address(value: unknown, field: string): string {
   // Go performs IP/CIDR semantic validation after decoding the request.
   if (result.length > 128 || new TextEncoder().encode(result).byteLength > 128) invalid(field);
   return result;
+}
+
+function array(value: unknown, field: string, minimumItemBytes: number): unknown[] {
+  if (!Array.isArray(value)) invalid(field);
+  // Even the smallest possible items must fit the restored JSON budget. The
+  // decompressed wire limit additionally bounds every array before parsing.
+  if (value.length > Math.floor((MAX_SHARE_STATE_BYTES + 1) / minimumItemBytes)) tooLarge('share.state');
+  return value as unknown[];
+}
+
+function initialAddresses(value: unknown): string[] {
+  return array(value, 'request.initial', 3)
+    .map((item, position) => address(item, `request.initial[${position}]`));
 }
 
 function index(value: unknown, field: string): number {
@@ -106,6 +142,17 @@ function sharedView(value: unknown): SharedView {
   return result;
 }
 
+function sharedOutput(value: unknown): SharedState['output'] {
+  const output = record(value, 'output', ['tab', 'cidrPage', 'rangePage', 'historyPage']);
+  if (output.tab !== 'cidrs' && output.tab !== 'ranges') invalid('output.tab');
+  return {
+    tab: output.tab,
+    cidrPage: index(output.cidrPage, 'output.cidrPage'),
+    rangePage: index(output.rangePage, 'output.rangePage'),
+    historyPage: index(output.historyPage, 'output.historyPage'),
+  };
+}
+
 function sharedState(value: unknown): SharedState {
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     const version = (value as Record<string, unknown>).version;
@@ -116,18 +163,14 @@ function sharedState(value: unknown): SharedState {
   const state = record(value, 'share', ['version', 'request', 'inputs', 'view', 'output']);
   if (state.version !== 1) invalid('version');
   const request = record(state.request, 'request', ['initial', 'operations']);
-  if (!Array.isArray(request.initial)) invalid('request.initial');
-  if (!Array.isArray(request.operations)) invalid('request.operations');
-  const initial = request.initial.map((value, position) => address(value, `request.initial[${position}]`));
-  const operations = request.operations.map((value, position): Operation => {
+  const initial = initialAddresses(request.initial);
+  const operations = array(request.operations, 'request.operations', 24).map((value, position): Operation => {
     const path = `request.operations[${position}]`;
     const operation = record(value, path, ['op', 'value']);
     if (operation.op !== 'add' && operation.op !== 'remove') invalid(`${path}.op`);
     return { op: operation.op, value: address(operation.value, `${path}.value`) };
   });
   const inputs = record(state.inputs, 'inputs', ['initial', 'operation', 'zoom']);
-  const output = record(state.output, 'output', ['tab', 'cidrPage', 'rangePage', 'historyPage']);
-  if (output.tab !== 'cidrs' && output.tab !== 'ranges') invalid('output.tab');
   return {
     version: 1,
     request: { initial, operations },
@@ -137,37 +180,148 @@ function sharedState(value: unknown): SharedState {
       zoom: string(inputs.zoom, 'inputs.zoom'),
     },
     view: sharedView(state.view),
-    output: {
-      tab: output.tab,
-      cidrPage: index(output.cidrPage, 'output.cidrPage'),
-      rangePage: index(output.rangePage, 'output.rangePage'),
-      historyPage: index(output.historyPage, 'output.historyPage'),
-    },
+    output: sharedOutput(state.output),
   };
 }
 
-async function readBounded(stream: ReadableStream<Uint8Array>, limit: number): Promise<Uint8Array<ArrayBuffer>> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value.byteLength > limit - size) {
-        // Cancel as soon as the limit is crossed; never buffer the full output
-        // of an attacker-controlled gzip stream before checking its size.
-        await reader.cancel().catch(() => {});
-        throw new ShareError('tooLarge');
+function serialized(value: unknown, limit: number): { json: string; bytes: Uint8Array<ArrayBuffer> } {
+  const json = JSON.stringify(value);
+  if (typeof json !== 'string') invalid('share');
+  if (json.length > limit) tooLarge('share.state');
+  const bytes = new TextEncoder().encode(json);
+  if (bytes.byteLength > limit) tooLarge('share.state');
+  return { json, bytes };
+}
+
+// Count the exact UTF-8 size of JSON.stringify(parts.join('')) without joining
+// the parts. A surrogate pair can cross a difference boundary; lone surrogates
+// instead use JSON's six-byte escape. This checks the budget before expansion.
+function jsonStringBytes(parts: string[], limit = MAX_SHARE_STATE_BYTES): number {
+  let size = 2;
+  let highSurrogate = false;
+  for (const part of parts) {
+    for (let position = 0; position < part.length; position++) {
+      const code = part.charCodeAt(position);
+      if (highSurrogate) {
+        highSurrogate = false;
+        if (code >= 0xdc00 && code <= 0xdfff) {
+          size += 4;
+          if (size > limit) tooLarge('share.state');
+          continue;
+        }
+        size += 6;
       }
-      chunks.push(value);
-      size += value.byteLength;
+      if (code >= 0xd800 && code <= 0xdbff) highSurrogate = true;
+      else if (code >= 0xdc00 && code <= 0xdfff) size += 6;
+      else if (code < 0x20) size += [8, 9, 10, 12, 13].includes(code) ? 2 : 6;
+      else if (code === 0x22 || code === 0x5c) size += 2;
+      else size += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3;
+      if (size > limit) tooLarge('share.state');
     }
-  } finally { reader.releaseLock(); }
-  const result = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.byteLength; }
-  return result;
+  }
+  if (highSurrogate) size += 6;
+  if (size > limit) tooLarge('share.state');
+  return size;
+}
+
+function initialInput(initial: string[], draft: string): InitialInput {
+  const base = initial.join('\n');
+  let prefix = 0;
+  const length = Math.min(base.length, draft.length);
+  while (prefix < length && base.charCodeAt(prefix) === draft.charCodeAt(prefix)) prefix++;
+  let suffix = 0;
+  while (suffix < length - prefix
+    && base.charCodeAt(base.length - suffix - 1) === draft.charCodeAt(draft.length - suffix - 1)) suffix++;
+  const middle = draft.slice(prefix, draft.length - suffix);
+  // Positions use UTF-16 code units, exactly as String.length and slice do.
+  // Select the difference only when its serialized bytes are actually smaller.
+  const differenceSize = String(prefix).length + String(suffix).length + 4 + jsonStringBytes([middle]);
+  return differenceSize < jsonStringBytes([draft]) ? [prefix, suffix, middle] : draft;
+}
+
+function pack(state: SharedState): SharedWireV2 {
+  return {
+    version: 2,
+    initial: state.request.initial,
+    operations: state.request.operations.map(({ op, value }) => [op === 'add' ? 0 : 1, value]),
+    inputs: [initialInput(state.request.initial, state.inputs.initial), state.inputs.operation, state.inputs.zoom],
+    view: state.view,
+    output: state.output,
+  };
+}
+
+function tuple(value: unknown, field: string, length: number): unknown[] {
+  if (!Array.isArray(value) || value.length !== length) invalid(field);
+  return value as unknown[];
+}
+
+function initialInputParts(value: unknown, initial: string[]): string[] {
+  if (typeof value === 'string') return [value];
+  const difference = tuple(value, 'inputs.initial', 3);
+  const prefix = index(difference[0], 'inputs.initial.prefix');
+  const suffix = index(difference[1], 'inputs.initial.suffix');
+  const middle = string(difference[2], 'inputs.initial.middle');
+  const base = initial.join('\n');
+  if (prefix > base.length || suffix > base.length - prefix) invalid('inputs.initial');
+  return [base.slice(0, prefix), middle, base.slice(base.length - suffix)];
+}
+
+function unpackV2(value: unknown): SharedState {
+  const wire = record(value, 'share', ['version', 'initial', 'operations', 'inputs', 'view', 'output']);
+  if (wire.version !== 2) invalid('version');
+  const initial = initialAddresses(wire.initial);
+  const operations = array(wire.operations, 'request.operations', 24).map((value, position): Operation => {
+    const path = `request.operations[${position}]`;
+    const operation = tuple(value, path, 2);
+    if (operation[0] !== 0 && operation[0] !== 1) invalid(`${path}.op`);
+    return { op: operation[0] === 0 ? 'add' : 'remove', value: address(operation[1], `${path}.value`) };
+  });
+  const inputs = tuple(wire.inputs, 'inputs', 3);
+  const state: SharedState = {
+    version: 1,
+    request: { initial, operations },
+    inputs: { initial: '', operation: string(inputs[1], 'inputs.operation'), zoom: string(inputs[2], 'inputs.zoom') },
+    view: sharedView(wire.view),
+    output: sharedOutput(wire.output),
+  };
+  const remaining = MAX_SHARE_STATE_BYTES - serialized(state, MAX_SHARE_STATE_BYTES).bytes.byteLength + 2;
+  const parts = initialInputParts(inputs[0], initial);
+  jsonStringBytes(parts, remaining);
+  state.inputs.initial = parts.join('');
+  return sharedState(state);
+}
+
+// Retain earlier entries when adding future wire formats. The unpublished v1
+// format is intentionally unsupported; the UI's SharedState.version stays 1.
+const wireDecoders: Readonly<Record<number, ((value: unknown) => SharedState) | undefined>> = { 2: unpackV2 };
+
+/** Serialize the lossless, versioned wire format independently of compression. */
+export function encodeSharedState(value: SharedState): Uint8Array<ArrayBuffer> {
+  try {
+    const state = sharedState(JSON.parse(serialized(value, MAX_SHARE_STATE_BYTES).json));
+    return serialized(pack(state), MAX_SHARE_WIRE_BYTES).bytes;
+  } catch (error) {
+    if (error instanceof ShareError) throw error;
+    throw new ShareError('invalid');
+  }
+}
+
+/** Decode wire bytes; keep format dispatch here when future versions are added. */
+export function decodeSharedState(bytes: Uint8Array, expectedVersion?: number): SharedState {
+  try {
+    if (bytes.byteLength > MAX_SHARE_WIRE_BYTES) tooLarge('share.state');
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) invalid('share');
+    const version = (value as Record<string, unknown>).version;
+    if (typeof version !== 'number' || !Number.isSafeInteger(version)) invalid('version');
+    const decode = wireDecoders[version];
+    if (!decode) throw new ShareError('unsupported', 'Unsupported shared state version.', 'version');
+    if (expectedVersion !== undefined && version !== expectedVersion) invalid('version');
+    return decode(value);
+  } catch (error) {
+    if (error instanceof ShareError) throw error;
+    throw new ShareError('invalid');
+  }
 }
 
 function base64url(bytes: Uint8Array): string {
@@ -185,21 +339,13 @@ function compressedBytes(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-export async function encodeShare(state: SharedState): Promise<string> {
+export async function encodeShare(state: SharedState, compression: ShareCompression): Promise<string> {
   try {
-    if (typeof CompressionStream !== 'function') throw new ShareError('unsupported');
-    const json = JSON.stringify(state);
-    if (typeof json !== 'string') invalid('share');
-    if (json.length > MAX_SHARE_STATE_BYTES) throw new ShareError('tooLarge');
-    const bytes = new TextEncoder().encode(json);
-    if (bytes.byteLength > MAX_SHARE_STATE_BYTES) throw new ShareError('tooLarge');
-    sharedState(JSON.parse(json));
-    let compressor: CompressionStream;
-    try { compressor = new CompressionStream('gzip'); }
-    catch { throw new ShareError('unsupported'); }
-    const stream = new Blob([bytes]).stream().pipeThrough(compressor);
-    const hash = PREFIX + base64url(await readBounded(stream, MAX_COMPRESSED_BYTES));
-    if (hash.length > MAX_SHARE_HASH_LENGTH) throw new ShareError('tooLarge');
+    const result = await compression.compress(encodeSharedState(state));
+    if (result.codec !== 'g' && result.codec !== 'b') invalid('share.codec');
+    if (result.data.byteLength > MAX_COMPRESSED_BYTES) tooLarge('share.url');
+    const hash = `#s=${VERSION}.${result.codec}.` + base64url(result.data);
+    if (hash.length > MAX_SHARE_HASH_LENGTH) tooLarge('share.url');
     return hash;
   } catch (error) {
     if (error instanceof ShareError) throw error;
@@ -207,22 +353,20 @@ export async function encodeShare(state: SharedState): Promise<string> {
   }
 }
 
-export async function decodeShare(hash: string): Promise<SharedState | null> {
+export async function decodeShare(hash: string, compression: ShareCompression): Promise<SharedState | null> {
   if (!hash.startsWith('#s=')) return null;
   try {
-    if (hash.length > MAX_SHARE_HASH_LENGTH) throw new ShareError('tooLarge');
+    if (hash.length > MAX_SHARE_HASH_LENGTH) tooLarge('share.url');
     const header = /^#s=(\d+)\./.exec(hash);
     if (!header) invalid('share');
-    if (header[1] !== '1') throw new ShareError('unsupported', 'Unsupported shared link version.', 'version');
-    if (typeof DecompressionStream !== 'function') throw new ShareError('unsupported');
-    const bytes = compressedBytes(hash.slice(header[0].length));
-    let decompressor: DecompressionStream;
-    try { decompressor = new DecompressionStream('gzip'); }
-    catch { throw new ShareError('unsupported'); }
-    const stream = new Blob([bytes]).stream().pipeThrough(decompressor);
-    const expanded = await readBounded(stream, MAX_SHARE_STATE_BYTES);
-    const json = new TextDecoder('utf-8', { fatal: true }).decode(expanded);
-    return sharedState(JSON.parse(json));
+    if (!Object.hasOwn(wireDecoders, header[1])) throw new ShareError('unsupported', 'Unsupported shared link version.', 'version');
+    const encoding = /^([a-z])\./.exec(hash.slice(header[0].length));
+    if (!encoding) invalid('share.codec');
+    const codec = encoding[1];
+    if (codec !== 'g' && codec !== 'b') throw new ShareError('unsupported', 'Unsupported shared compression format.', 'share.codec');
+    const bytes = compressedBytes(hash.slice(header[0].length + encoding[0].length));
+    if (bytes.byteLength > MAX_COMPRESSED_BYTES) tooLarge('share.url');
+    return decodeSharedState(await compression.decompress(codec, bytes), Number(header[1]));
   } catch (error) {
     if (error instanceof ShareError) throw error;
     throw new ShareError('invalid');

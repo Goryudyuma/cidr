@@ -4,7 +4,7 @@ import { getLocale, setLocale, localeURL, localeFromURL, type Locale } from './i
 import { text, type MessageKey } from './messages';
 import type { Operation, Request, Result } from './types';
 import { Visualization } from './visualization';
-import { decodeShare, encodeShare, ShareError, type SharedState } from './share';
+import { ShareError, type SharedState } from './share';
 
 const label = (key: MessageKey): string => `<span data-i18n="${key}">${text(key)}</span>`;
 
@@ -131,9 +131,10 @@ function clearShareFeedback(): void {
 }
 
 function shareError(error: unknown): void {
-  setShareStatus(error instanceof ShareError
-    ? error.code === 'tooLarge' ? 'shareTooLarge' : error.code === 'unsupported' ? 'shareUnsupported' : 'shareInvalid'
-    : 'shareInvalid');
+  if (!(error instanceof ShareError)) { setShareStatus('shareInvalid'); return; }
+  setShareStatus(error.code === 'tooLarge'
+    ? error.field === 'share.state' ? 'shareStateTooLarge' : 'shareTooLarge'
+    : error.code === 'unsupported' ? 'shareUnsupported' : 'shareInvalid');
 }
 
 function updateLanguageLinks(): void {
@@ -299,7 +300,7 @@ async function restoreShare(hash: string): Promise<void> {
   setShareStatus('shareRestoring'); updateControls();
   const started = performance.now();
   try {
-    const shared = await decodeShare(hash);
+    const shared = await engine.shareDecode(hash);
     if (current !== generation) return;
     await engine.ready;
     if (current !== generation) return;
@@ -497,7 +498,7 @@ $('#copy-share').addEventListener('click', async () => {
   const url = localeURL(getLocale());
   shareBusy = true; setShareStatus('shareCreating'); updateControls();
   try {
-    url.hash = await encodeShare(snapshot);
+    url.hash = await engine.shareEncode(snapshot);
     if (current !== shareGeneration) return;
     try {
       await navigator.clipboard.writeText(url.href);
@@ -509,7 +510,10 @@ $('#copy-share').addEventListener('click', async () => {
       setShareStatus('shareCopyFailed'); input.focus(); input.select();
     }
   } catch (error) {
-    if (current === shareGeneration) shareError(error);
+    if (current === shareGeneration) {
+      if (error instanceof ShareError) shareError(error);
+      else { setShareStatus('shareFailed'); showError(error); }
+    }
   } finally {
     if (current === shareGeneration) { shareBusy = false; updateControls(); }
   }

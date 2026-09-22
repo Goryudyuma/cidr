@@ -20,9 +20,10 @@
     "preview": "vite preview --config web/vite.config.ts",
     "deploy": "npm run build && wrangler deploy",
     "test:go": "go test -race ./...",
+    "test:share": "node --test tests/share/*.test.mjs",
     "test:browser": "npm run build && playwright test",
     "test:cache": "node scripts/check-cache.mjs",
-    "test": "npm run test:go && npm run test:browser"
+    "test": "npm run test:share && npm run test:go && npm run test:browser"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

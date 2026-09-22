@@ -1,0 +1,31 @@
+{
+  "description": "Frozen share schema 2 fixtures. Preserve decoding compatibility with these exact gzip and Brotli links.",
+  "state": {
+    "version": 1,
+    "request": {
+      "initial": ["192.0.2.0/30", "192.0.2.4/30"],
+      "operations": [
+        { "op": "remove", "value": "192.0.2.3" },
+        { "op": "remove", "value": "192.0.2.4/31" }
+      ]
+    },
+    "inputs": {
+      "initial": "192.0.2.0/30\n192.0.2.4/30",
+      "operation": "",
+      "zoom": ""
+    },
+    "view": { "mode": "all", "viewports": {}, "relatedPage": 0 },
+    "output": { "tab": "ranges", "cidrPage": 0, "rangePage": 0, "historyPage": 0 }
+  },
+  "cidrs": ["192.0.2.0/31", "192.0.2.2/32", "192.0.2.6/31"],
+  "links": [
+    {
+      "codec": "gzip",
+      "hash": "#s=2.g.H4sIAAAAAAAAE02Myw6DIBRE_2XWN4poF-UrujcsaCX2JhQMoE1j_PeG2tdqciZnZsViY-LgoSSBPWc2DqpHc5SVqGQl6laAvtgV1IQw2WgyB5-g-r75CS00_XNXtw20Lt_TnF-2PJAglBfssbC9Q624hcFCwTiHvZxCLJN1I0TrTLbDyYwWSmyEMOdpzmWWzRkK0fjRJhAuPMS3Rnv7pSunHOLjc7I9AfakviD-AAAA"
+    },
+    {
+      "codec": "brotli",
+      "hash": "#s=2.b.G_0AMIzUVnkjBA9B2LbUP-9wAw2mvCOgFu9IYtutWHTWW_3e0qse_T4zkk0ouikEgdA1IdqdtVrbnj27VpQ4yQWR81WCUmMV_oiZHTtr0dK3pgjg_nTUfHS3cGh8u6XBLEoz0aUeogLdnHDnymDak4w5wfvmxUgcxGMN1BSuoAz-cUUW2xa43-fLJIl4p_so5Uw"
+    }
+  ]
+}

@@ -63,6 +63,8 @@ jobs:
           "$(go env GOPATH)/bin/actionlint"
       - name: Test CI maintenance logic
         run: node --test tests/ci/*.test.mjs
+      - name: Test lossless share serialization
+        run: npm run test:share
 
   security:
     name: Security
