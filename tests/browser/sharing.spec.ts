@@ -1,4 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { brotliCompressSync, brotliDecompressSync, gzipSync, gunzipSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import type { SharedState } from '../../web/src/share';
 
 async function ready(page: Page, path = '/'): Promise<void> {
   await page.goto(path);
@@ -9,11 +12,11 @@ async function ready(page: Page, path = '/'): Promise<void> {
 async function copyShareLink(page: Page): Promise<string> {
   await page.evaluate(() => navigator.clipboard.writeText(''));
   await page.locator('#copy-share').click();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/^https?:\/\/[^\s]+#s=1\.[A-Za-z0-9_-]+$/);
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(/^https?:\/\/[^\s]+#s=2\.[gb]\.[A-Za-z0-9_-]+$/);
   return page.evaluate(() => navigator.clipboard.readText());
 }
 
-function validState() {
+function validState(): SharedState {
   return {
     version: 1,
     request: { initial: ['192.0.2.0/24'], operations: [] },
@@ -23,21 +26,56 @@ function validState() {
   };
 }
 
-async function encodeHash(page: Page, state: unknown): Promise<string> {
-  return page.evaluate(async (value) => {
-    const compressed = new Blob([JSON.stringify(value)]).stream().pipeThrough(new CompressionStream('gzip'));
-    const bytes = new Uint8Array(await new Response(compressed).arrayBuffer());
-    return '#s=1.' + btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
-  }, state);
+type Draft = string | [number, number, string];
+
+function wireState(state: SharedState = validState(), draft: Draft = state.inputs.initial) {
+  return {
+    version: 2,
+    initial: state.request.initial,
+    operations: state.request.operations.map(({ op, value }) => [op === 'add' ? 0 : 1, value]),
+    inputs: [draft, state.inputs.operation, state.inputs.zoom],
+    view: state.view,
+    output: state.output,
+  };
 }
 
-async function decodeLink(page: Page, link: string) {
-  return page.evaluate(async (url) => {
-    const encoded = new URL(url).hash.slice('#s=1.'.length).replaceAll('-', '+').replaceAll('_', '/');
-    const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
-    const decompressed = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-    return JSON.parse(await new Response(decompressed).text());
-  }, link);
+function encodeWireHash(wire: unknown, codec: 'g' | 'b' = 'g'): string {
+  const bytes = Buffer.from(JSON.stringify(wire));
+  const compressed = codec === 'g' ? gzipSync(bytes) : brotliCompressSync(bytes);
+  return `#s=2.${codec}.${compressed.toString('base64url')}`;
+}
+
+function encodeHash(_page: Page, state: SharedState): string {
+  return encodeWireHash(wireState(state));
+}
+
+function legacyHash(state: SharedState): string {
+  return '#s=1.' + gzipSync(JSON.stringify(state)).toString('base64url');
+}
+
+function decodeWire(link: string) {
+  const match = /^#s=2\.([gb])\.([A-Za-z0-9_-]+)$/.exec(new URL(link).hash);
+  if (!match) throw new Error('Expected a version 2 share link');
+  const compressed = Buffer.from(match[2], 'base64url');
+  return JSON.parse((match[1] === 'g' ? gunzipSync(compressed) : brotliDecompressSync(compressed)).toString('utf8'));
+}
+
+// Independent wire decoding verifies losslessness without importing the codec.
+function decodeLink(_page: Page, link: string): SharedState {
+  const wire = decodeWire(link);
+  const base = wire.initial.join('\n');
+  const draft: Draft = wire.inputs[0];
+  return {
+    version: 1,
+    request: { initial: wire.initial, operations: wire.operations.map(([op, value]: [number, string]) => ({ op: op === 0 ? 'add' : 'remove', value })) },
+    inputs: {
+      initial: typeof draft === 'string' ? draft : base.slice(0, draft[0]) + draft[2] + base.slice(base.length - draft[1]),
+      operation: wire.inputs[1],
+      zoom: wire.inputs[2],
+    },
+    view: wire.view,
+    output: wire.output,
+  };
 }
 
 async function editorSnapshot(page: Page) {
@@ -160,36 +198,47 @@ test('an empty English set can be shared offline and its fragment never enters H
   expect(requests.length).toBeGreaterThan(0);
   for (const request of requests) {
     expect(new URL(request.url).hash).toBe('');
-    expect(request.url).not.toContain(fragment.slice('#s=1.'.length));
+    expect(request.url).not.toContain(fragment.slice('#s=2.g.'.length));
     if (request.referer) expect(new URL(request.referer).hash).toBe('');
   }
 });
 
 test('malformed, unknown, oversized and invalid shared states fail without partial restoration', async ({ page }) => {
+  test.setTimeout(60_000);
   await ready(page);
-  const oversized = validState();
-  oversized.inputs.initial = 'x'.repeat(1024 * 1024 + 1);
+  const wire = wireState();
   const invalidRequest = validState();
   invalidRequest.request.initial.push('not-an-IP');
   const cases = [
-    { name: 'malformed base64', hash: '#s=1.***' },
-    { name: 'unknown envelope version', hash: '#s=99.AAAA' },
-    { name: 'unknown state version', hash: await encodeHash(page, { ...validState(), version: 2 }) },
-    { name: 'unknown state field', hash: await encodeHash(page, { ...validState(), unexpected: true }) },
-    { name: 'unsafe page index', hash: await encodeHash(page, { ...validState(), output: { ...validState().output, cidrPage: Number.MAX_SAFE_INTEGER + 1 } }) },
-    { name: 'IPv6 coordinate exceeds its address space', hash: await encodeHash(page, {
-      ...validState(),
+    { name: 'malformed base64', hash: '#s=2.g.***' },
+    { name: 'retired version 1 with a formerly valid payload', hash: legacyHash(validState()) },
+    { name: 'unknown envelope version', hash: '#s=99.g.AAAA' },
+    { name: 'unknown codec', hash: '#s=2.x.AAAA' },
+    { name: 'unknown wire version', hash: encodeWireHash({ ...wire, version: 3 }) },
+    { name: 'unknown wire field', hash: encodeWireHash({ ...wire, unexpected: true }) },
+    { name: 'unsafe page index', hash: encodeWireHash({ ...wire, output: { ...wire.output, cidrPage: Number.MAX_SAFE_INTEGER + 1 } }) },
+    { name: 'negative draft prefix', hash: encodeWireHash({ ...wire, inputs: [[-1, 0, ''], '', ''] }) },
+    { name: 'overlapping draft prefix and suffix', hash: encodeWireHash({ ...wire, inputs: [[wire.initial.join('\n').length, 1, ''], '', ''] }) },
+    { name: 'fractional draft index', hash: encodeWireHash({ ...wire, inputs: [[0.5, 0, ''], '', ''] }) },
+    { name: 'unsafe draft index', hash: encodeWireHash({ ...wire, inputs: [[Number.MAX_SAFE_INTEGER + 1, 0, ''], '', ''] }) },
+    { name: 'malformed draft tuple', hash: encodeWireHash({ ...wire, inputs: [[0, 0, '', 'extra'], '', ''] }) },
+    { name: 'unknown operation tag', hash: encodeWireHash({ ...wire, operations: [[2, '192.0.2.1']] }) },
+    { name: 'malformed operation tuple', hash: encodeWireHash({ ...wire, operations: [[0, '192.0.2.1', 'extra']] }) },
+    { name: 'incomplete inputs tuple', hash: encodeWireHash({ ...wire, inputs: ['draft', 'operation'] }) },
+    { name: 'IPv6 coordinate exceeds its address space', hash: encodeWireHash({
+      ...wire,
       view: { ...validState().view, viewports: { ipv6: { start: '0', end: (1n << 128n).toString(), label: { kind: 'custom', text: '::/0' } } } },
     }) },
-    { name: 'oversized fragment', hash: '#s=1.' + 'A'.repeat(32768) },
-    { name: 'gzip expands beyond 1 MiB', hash: await encodeHash(page, oversized) },
+    { name: 'oversized fragment', hash: '#s=2.g.' + 'A'.repeat(32768) },
+    { name: 'wire expands beyond 8 MiB', hash: encodeWireHash({ ...wire, inputs: ['x'.repeat(8 * 1024 * 1024 + 1), '', ''] }), sizeError: true },
+    { name: 'compact wire restores beyond 16 MiB', hash: encodeWireHash({ ...wire, operations: Array(660_000).fill([0, '::']) }), sizeError: true },
     { name: 'valid prefix followed by an invalid IP', hash: await encodeHash(page, invalidRequest) },
   ];
   for (const item of cases) {
     await test.step(item.name, async () => {
       await page.goto('about:blank');
       await page.goto(`/${item.hash}`);
-      await expect(page.locator('#share-status')).toContainText(/共有リンクが正しく|未対応の共有リンク|サイズ上限/);
+      await expect(page.locator('#share-status')).toContainText(item.sizeError ? '展開・復元サイズ' : /共有リンクが正しく|未対応の共有リンク|サイズ上限|展開・復元サイズ/);
       await expect(page.locator('#engine-status')).toHaveAttribute('data-state', 'ready');
       await expect(page.locator('#cidr-count')).toHaveText('0');
       await expect(page.locator('#count-ipv4')).toHaveText('0');
@@ -225,21 +274,30 @@ test('valid large page indexes clamp to the restored result instead of leaving e
   await expect(page.locator('#tab-ranges')).toHaveAttribute('aria-selected', 'true');
 });
 
-test('a draft larger than the sharing limit leaves the applied set usable', async ({ page }) => {
+test('a compressible draft larger than 1 MiB can be shared without changing the applied set', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await ready(page);
   await page.locator('#load-example').click();
   await expect(page.locator('#count-ipv4')).toHaveText('5');
   const applied = await page.locator('#initial-input').inputValue();
+  const draft = '🌱 x \n'.repeat(200_000);
+  expect(Buffer.byteLength(draft)).toBeGreaterThan(1024 * 1024);
   await page.locator('#initial-input').evaluate((element, value) => {
     (element as HTMLTextAreaElement).value = value;
     element.dispatchEvent(new Event('input', { bubbles: true }));
-  }, 'x'.repeat(1024 * 1024 + 1));
-  await page.locator('#copy-share').click();
-  await expect(page.locator('#share-status')).toContainText('サイズ上限');
+  }, draft);
+  const link = await copyShareLink(page);
+  expect(decodeLink(page, link).inputs.initial).toBe(draft);
+  expect(new URL(link).hash.length).toBeLessThanOrEqual(32768);
   await expect(page.locator('#share-fallback')).toBeHidden();
   await expect(page.locator('#count-ipv4')).toHaveText('5');
   await expect(page.locator('#operation-count')).toHaveText('2');
   await expect(page.locator('#copy-cidrs')).toBeEnabled();
+  const restored = await context.newPage();
+  await restored.goto(link);
+  await expect(restored.locator('#share-status')).toHaveText('共有された内容を復元しました。');
+  await expect(restored.locator('#initial-input')).toHaveValue(draft);
+  await expect(restored.locator('#count-ipv4')).toHaveText('5');
   await page.locator('#initial-input').fill(applied);
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#add-operation').click();
@@ -328,9 +386,95 @@ test('clipboard denial exposes a usable read-only share URL', async ({ page, con
   await expect(page.locator('#share-link')).toHaveJSProperty('readOnly', true);
   await expect(page.locator('#share-status')).not.toBeEmpty();
   const link = await page.locator('#share-link').inputValue();
-  expect(new URL(link).hash).toMatch(/^#s=1\.[A-Za-z0-9_-]+$/);
+  expect(new URL(link).hash).toMatch(/^#s=2\.[gb]\.[A-Za-z0-9_-]+$/);
   const restored = await context.newPage();
   await restored.goto(link);
   await expect(restored.locator('#engine-status')).toHaveAttribute('data-state', 'ready');
   await expect(restored.locator('#cidr-list code')).toHaveText(['192.0.2.0/31', '192.0.2.2/32', '192.0.2.6/31']);
+});
+
+test('raw and differential drafts preserve spelling, duplicates, order, whitespace and Unicode', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const state = validState();
+  state.request.initial = ['2001:0DB8:0:0:0:0:0:1/120', '192.0.2.7/24', '192.0.2.7/24', '2001:db8::1/120'];
+  state.request.operations = [
+    { op: 'remove', value: '192.0.2.1' },
+    { op: 'add', value: '192.0.2.1' },
+    { op: 'remove', value: '2001:DB8::1' },
+    { op: 'add', value: '2001:DB8::1' },
+    { op: 'remove', value: '192.0.2.2' },
+  ];
+  state.inputs.operation = ' \t203.0.113.9　';
+  state.inputs.zoom = ' \t2001:DB8::/64🙂 ';
+  const base = state.request.initial.join('\n');
+  const cases: { name: string; draft: string; packed: Draft }[] = [
+    { name: 'exact initial text', draft: base, packed: [base.length, 0, ''] },
+    { name: 'small middle edit', draft: base.slice(0, 8) + '🦜 \n\t' + base.slice(8), packed: [8, base.length - 8, '🦜 \n\t'] },
+    { name: 'raw unrelated draft', draft: ' \t未適用🙂 \n\n 末尾𠮷　\n', packed: ' \t未適用🙂 \n\n 末尾𠮷　\n' },
+  ];
+  for (const item of cases) {
+    await test.step(item.name, async () => {
+      const expected = { ...state, inputs: { ...state.inputs, initial: item.draft } };
+      await page.goto('about:blank');
+      await page.goto(`/${encodeWireHash(wireState(expected, item.packed))}`);
+      await expect(page.locator('#share-status')).toHaveText('共有された内容を復元しました。');
+      await expect(page.locator('#initial-input')).toHaveValue(item.draft);
+      await expect(page.locator('#count-ipv4')).toHaveText('255');
+      await expect(page.locator('#count-ipv6')).toHaveText('256');
+      const copied = await copyShareLink(page);
+      expect(decodeLink(page, copied)).toEqual(expected);
+      expect(Array.isArray(decodeWire(copied).inputs[0])).toBe(item.name !== 'raw unrelated draft');
+      const before = await editorSnapshot(page);
+      const restored = await context.newPage();
+      try {
+        await restored.goto(copied);
+        await expect(restored.locator('#share-status')).toHaveText('共有された内容を復元しました。');
+        expect(await editorSnapshot(restored)).toEqual(before);
+      } finally { await restored.close(); }
+    });
+  }
+});
+
+test('6000 inputs exceed the former link limit but fit and restore with compact sharing', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await ready(page);
+  const initial = Array.from({ length: 6000 }, (_, index) => `10.${Math.floor(index / 256)}.${index % 256}.1`);
+  await page.locator('#initial-input').evaluate((element, text) => {
+    (element as HTMLTextAreaElement).value = text;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }, initial.join('\n'));
+  await page.locator('#apply-initial').click();
+  await expect(page.locator('#count-ipv4')).toHaveText('6,000');
+  const link = await copyShareLink(page);
+  const saved = decodeLink(page, link);
+  expect(saved.request.initial).toEqual(initial);
+  expect(saved.inputs.initial).toBe(initial.join('\n'));
+  const oldLength = legacyHash(saved).length;
+  const newLength = new URL(link).hash.length;
+  expect(oldLength).toBeGreaterThan(32768);
+  expect(newLength).toBeLessThanOrEqual(32768);
+  console.log(`6000 input sharing comparison: former gzip ${oldLength} characters, current ${newLength} characters.`);
+  const restored = await context.newPage();
+  await restored.goto(link);
+  await expect(restored.locator('#share-status')).toHaveText('共有された内容を復元しました。');
+  await expect(restored.locator('#cidr-count')).toHaveText('6,000');
+  await expect(restored.locator('#initial-input')).toHaveValue(initial.join('\n'));
+  await expect(restored.locator('#cidr-list code').first()).toHaveText('10.0.0.1/32');
+});
+
+test('frozen version 2 gzip and Brotli links remain readable by the real Wasm codec', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const fixture = JSON.parse(readFileSync(new URL('../fixtures/share-v2.json', import.meta.url), 'utf8'));
+  for (const link of fixture.links) {
+    await test.step(link.codec, async () => {
+      await page.goto('about:blank');
+      await page.goto(`/${link.hash}`);
+      await expect(page.locator('#share-status')).toHaveText('共有された内容を復元しました。');
+      await expect(page.locator('#cidr-list code')).toHaveText(fixture.cidrs);
+      await expect(page.locator('#count-ipv4')).toHaveText('5');
+      await expect(page.locator('#tab-ranges')).toHaveAttribute('aria-selected', 'true');
+      const copied = await copyShareLink(page);
+      expect(decodeLink(page, copied)).toEqual(fixture.state);
+    });
+  }
 });

@@ -25,6 +25,7 @@ runGo(['build', '-trimpath', '-ldflags=-s -w', '-o', join(output, 'core.wasm'), 
   env: { ...process.env, GOOS: 'js', GOARCH: 'wasm' }, stdio: 'inherit',
 });
 const netipx = runGo(['list', '-m', '-f', '{{.Dir}}', 'go4.org/netipx']).trim();
+const brotli = runGo(['list', '-m', '-f', '{{.Dir}}', 'github.com/andybalholm/brotli']).trim();
 await copyAsset(join(goroot, 'lib/wasm/wasm_exec.js'), join(output, 'wasm_exec.js'));
 // Homebrew keeps LICENSE next to libexec; official Go archives keep it in GOROOT.
 try {
@@ -34,5 +35,6 @@ try {
   await copyAsset(join(goroot, '..', 'LICENSE'), join(output, 'GO-LICENSE'));
 }
 await copyAsset(join(netipx, 'LICENSE'), join(output, 'NETIPX-LICENSE'));
+await copyAsset(join(brotli, 'LICENSE'), join(output, 'BROTLI-LICENSE'));
 await writeFile(join(output, 'build.json'), `${JSON.stringify({ go: version, target: 'js/wasm' }, null, 2)}\n`);
 console.log(`Built core.wasm and copied wasm_exec.js from ${version}.`);
