@@ -140,3 +140,14 @@ Node.js 24.7.0で`npm ci`、ESLint、Prettier、TypeScript型チェック、Wasm
 2026年9月22日の依存更新後、デプロイ直後のキャッシュ検査が失敗しました。[CIログ](https://github.com/Goryudyuma/cidr/actions/runs/35689966853)では、Wasmを取得する3回のHTTP要求の途中でGo build IDとVCS情報が切り替わっていました。配信後の再検査では7リソースの304・200応答、CI成果物とのWasm・ランタイムの一致、実Chromiumの共通37ケースと日英オフライン編集が成功しています。
 
 固定URLのETagと本文の両方が変わった場合だけ、そのファイルの検査を最大4回やり直す処理を追加しました。ローカルHTTPサーバーから応答を返して実際の検査スクリプトを起動し、安定した7リソースの検査、HTML・Wasmの版切替からの復帰、同じ版の不正な200応答、ETagか本文だけの変更、ハッシュ付きファイルの変更を検証します。公開URLの再検査も成功しました。
+
+## 本番ドメイン cidr.063.jp
+
+2026年9月22日、Cloudflareの有効な`063.jp`ゾーンへCustom Domainを登録し、既存のWorker `cidr`に紐付けました。API応答で`enabled: true`・`previews_enabled: false`を確認しています。
+
+- DNSのA・AAAA応答と、証明書検証を有効にしたHTTPSの200応答を確認
+- `https://cidr.063.jp/`の7リソースで、一致するETagの304・空本文、不一致のETagの200・現在の本文を確認
+- 公開Wasm・GoランタイムがCI成果物と一致
+- 実Chromiumで共通37ケース、英語直リンク、日英のオフライン切替・編集が成功。ブラウザ実行時エラー0件
+
+今後のmainデプロイ後は、CIで`cidr.063.jp`と既存の`workers.dev`の両方を検査します。
