@@ -14,7 +14,8 @@ IPv4・IPv6の集合を編集するWebツールと、同じGoコアを使うHTTP
 | Node.js | 24.7.0（`.nvmrc`、`package.json`） |
 | npm | 11.5.1 |
 | Vite | 8.2.2 |
-| TypeScript | 5.9.3 |
+| TypeScript | 6.0.3 |
+| Node.js型定義 | 24.13.3 |
 | Playwright | 1.62.1 |
 | Wrangler | 4.136.1 |
 | ESLint / typescript-eslint | 10.11.0 / 8.70.1 |
@@ -146,6 +147,8 @@ Dependabot自身がPRを閉じたときは[トークンの権限制限](https://
 ### Dependabot
 
 `.github/dependabot.yml`でnpm、Go modules、GitHub Actionsを対象にしています。毎週月曜09:00（日本時間）に確認し、`cooldown.default-days: 30`で公開から30日経ったバージョンを更新候補にします。minor・patchはエコシステムごとにまとめ、majorは個別のPRにします。自動マージは設定していません。[セキュリティ更新にはcooldownが適用されません](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#cooldown)。Go・Node.js・npm本体の固定バージョンは手動で更新し、関連ファイルの値も揃えてください。
+
+例外として、TypeScriptと`@types/node`の通常のmajor更新は保留しています。TypeScript 7は現在の[typescript-eslintの対応範囲](https://typescript-eslint.io/users/dependency-versions/)外なので、対応後に`ignore`を見直してください。`@types/node`のmajorはNode.js本体のmajor更新と合わせます。`update-types: ["version-update:semver-major"]`で通常更新だけを保留し、[セキュリティ更新は抑止しません](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/manage-your-dependency-security/controlling-dependencies-updated#ignoring-specific-dependencies)。更新PRは固定したNode.js上のCIと互換性を確認して取り込みます。
 
 ### ブラウザのキャッシュ
 
