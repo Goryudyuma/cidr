@@ -2,10 +2,7 @@
   {
     "name": "example",
     "request": {
-      "initial": [
-        "192.0.2.0/30",
-        "192.0.2.4/30"
-      ],
+      "initial": ["192.0.2.0/30", "192.0.2.4/30"],
       "operations": [
         {
           "op": "remove",
@@ -18,11 +15,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.0/31",
-        "192.0.2.2/32",
-        "192.0.2.6/31"
-      ],
+      "cidrs": ["192.0.2.0/31", "192.0.2.2/32", "192.0.2.6/31"],
       "ranges": [
         {
           "family": "ipv4",
@@ -44,15 +37,10 @@
   {
     "name": "adjacent_merge",
     "request": {
-      "initial": [
-        "192.0.2.4/30",
-        "192.0.2.0/30"
-      ]
+      "initial": ["192.0.2.4/30", "192.0.2.0/30"]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.0/29"
-      ],
+      "cidrs": ["192.0.2.0/29"],
       "ranges": [
         {
           "family": "ipv4",
@@ -69,17 +57,10 @@
   {
     "name": "overlap_and_duplicates",
     "request": {
-      "initial": [
-        "10.0.0.0/24",
-        "10.0.0.0/25",
-        "10.0.0.1",
-        "10.0.0.0/24"
-      ]
+      "initial": ["10.0.0.0/24", "10.0.0.0/25", "10.0.0.1", "10.0.0.0/24"]
     },
     "result": {
-      "cidrs": [
-        "10.0.0.0/24"
-      ],
+      "cidrs": ["10.0.0.0/24"],
       "ranges": [
         {
           "family": "ipv4",
@@ -96,9 +77,7 @@
   {
     "name": "remove_single_ip",
     "request": {
-      "initial": [
-        "192.0.2.0/30"
-      ],
+      "initial": ["192.0.2.0/30"],
       "operations": [
         {
           "op": "remove",
@@ -107,10 +86,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.0/32",
-        "192.0.2.2/31"
-      ],
+      "cidrs": ["192.0.2.0/32", "192.0.2.2/31"],
       "ranges": [
         {
           "family": "ipv4",
@@ -132,9 +108,7 @@
   {
     "name": "remove_partial_cidr",
     "request": {
-      "initial": [
-        "192.0.2.0/24"
-      ],
+      "initial": ["192.0.2.0/24"],
       "operations": [
         {
           "op": "remove",
@@ -143,10 +117,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.0/26",
-        "192.0.2.128/25"
-      ],
+      "cidrs": ["192.0.2.0/26", "192.0.2.128/25"],
       "ranges": [
         {
           "family": "ipv4",
@@ -168,10 +139,7 @@
   {
     "name": "remove_all",
     "request": {
-      "initial": [
-        "192.0.2.0/24",
-        "2001:db8::/32"
-      ],
+      "initial": ["192.0.2.0/24", "2001:db8::/32"],
       "operations": [
         {
           "op": "remove",
@@ -230,9 +198,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.1/32"
-      ],
+      "cidrs": ["192.0.2.1/32"],
       "ranges": [
         {
           "family": "ipv4",
@@ -249,9 +215,7 @@
   {
     "name": "readd_after_remove",
     "request": {
-      "initial": [
-        "192.0.2.0/30"
-      ],
+      "initial": ["192.0.2.0/30"],
       "operations": [
         {
           "op": "remove",
@@ -272,9 +236,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.0/30"
-      ],
+      "cidrs": ["192.0.2.0/30"],
       "ranges": [
         {
           "family": "ipv4",
@@ -318,16 +280,10 @@
   {
     "name": "normalize_host_bits",
     "request": {
-      "initial": [
-        "192.0.2.123/24",
-        "2001:db8::abcd/112"
-      ]
+      "initial": ["192.0.2.123/24", "2001:db8::abcd/112"]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.0/24",
-        "2001:db8::/112"
-      ],
+      "cidrs": ["192.0.2.0/24", "2001:db8::/112"],
       "ranges": [
         {
           "family": "ipv4",
@@ -349,14 +305,10 @@
   {
     "name": "ipv4_universe",
     "request": {
-      "initial": [
-        "0.0.0.0/0"
-      ]
+      "initial": ["0.0.0.0/0"]
     },
     "result": {
-      "cidrs": [
-        "0.0.0.0/0"
-      ],
+      "cidrs": ["0.0.0.0/0"],
       "ranges": [
         {
           "family": "ipv4",
@@ -373,14 +325,10 @@
   {
     "name": "ipv6_universe",
     "request": {
-      "initial": [
-        "::/0"
-      ]
+      "initial": ["::/0"]
     },
     "result": {
-      "cidrs": [
-        "::/0"
-      ],
+      "cidrs": ["::/0"],
       "ranges": [
         {
           "family": "ipv6",
@@ -397,16 +345,10 @@
   {
     "name": "both_universes",
     "request": {
-      "initial": [
-        "::/0",
-        "0.0.0.0/0"
-      ]
+      "initial": ["::/0", "0.0.0.0/0"]
     },
     "result": {
-      "cidrs": [
-        "0.0.0.0/0",
-        "::/0"
-      ],
+      "cidrs": ["0.0.0.0/0", "::/0"],
       "ranges": [
         {
           "family": "ipv4",
@@ -428,16 +370,10 @@
   {
     "name": "ipv4_boundary_singles",
     "request": {
-      "initial": [
-        "255.255.255.255/32",
-        "0.0.0.0"
-      ]
+      "initial": ["255.255.255.255/32", "0.0.0.0"]
     },
     "result": {
-      "cidrs": [
-        "0.0.0.0/32",
-        "255.255.255.255/32"
-      ],
+      "cidrs": ["0.0.0.0/32", "255.255.255.255/32"],
       "ranges": [
         {
           "family": "ipv4",
@@ -459,16 +395,10 @@
   {
     "name": "ipv6_boundary_singles",
     "request": {
-      "initial": [
-        "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128",
-        "::"
-      ]
+      "initial": ["ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128", "::"]
     },
     "result": {
-      "cidrs": [
-        "::/128",
-        "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"
-      ],
+      "cidrs": ["::/128", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128"],
       "ranges": [
         {
           "family": "ipv6",
@@ -490,15 +420,10 @@
   {
     "name": "ipv6_adjacent_merge",
     "request": {
-      "initial": [
-        "2001:db8::4/126",
-        "2001:db8::/126"
-      ]
+      "initial": ["2001:db8::4/126", "2001:db8::/126"]
     },
     "result": {
-      "cidrs": [
-        "2001:db8::/125"
-      ],
+      "cidrs": ["2001:db8::/125"],
       "ranges": [
         {
           "family": "ipv6",
@@ -515,9 +440,7 @@
   {
     "name": "ipv6_partial_remove",
     "request": {
-      "initial": [
-        "2001:db8::/125"
-      ],
+      "initial": ["2001:db8::/125"],
       "operations": [
         {
           "op": "remove",
@@ -530,11 +453,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "2001:db8::/127",
-        "2001:db8::2/128",
-        "2001:db8::6/127"
-      ],
+      "cidrs": ["2001:db8::/127", "2001:db8::2/128", "2001:db8::6/127"],
       "ranges": [
         {
           "family": "ipv6",
@@ -556,12 +475,7 @@
   {
     "name": "mixed_sort_and_family_isolation",
     "request": {
-      "initial": [
-        "2001:db8::2",
-        "198.51.100.1",
-        "2001:db8::1",
-        "192.0.2.1"
-      ],
+      "initial": ["2001:db8::2", "198.51.100.1", "2001:db8::1", "192.0.2.1"],
       "operations": [
         {
           "op": "remove",
@@ -570,12 +484,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "192.0.2.1/32",
-        "198.51.100.1/32",
-        "2001:db8::1/128",
-        "2001:db8::2/128"
-      ],
+      "cidrs": ["192.0.2.1/32", "198.51.100.1/32", "2001:db8::1/128", "2001:db8::2/128"],
       "ranges": [
         {
           "family": "ipv4",
@@ -602,9 +511,7 @@
   {
     "name": "large_exact_ipv6_count",
     "request": {
-      "initial": [
-        "2001:db8::/64"
-      ],
+      "initial": ["2001:db8::/64"],
       "operations": [
         {
           "op": "remove",
@@ -613,9 +520,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "2001:db8:0:0:8000::/65"
-      ],
+      "cidrs": ["2001:db8:0:0:8000::/65"],
       "ranges": [
         {
           "family": "ipv6",
@@ -632,10 +537,7 @@
   {
     "name": "invalid_initial",
     "request": {
-      "initial": [
-        "192.0.2.0/24",
-        "bad"
-      ]
+      "initial": ["192.0.2.0/24", "bad"]
     },
     "error": {
       "code": "invalid_ip",
@@ -679,9 +581,7 @@
   {
     "name": "mapped_ipv6",
     "request": {
-      "initial": [
-        "::ffff:192.0.2.1"
-      ]
+      "initial": ["::ffff:192.0.2.1"]
     },
     "error": {
       "code": "unsupported_address",
@@ -691,9 +591,7 @@
   {
     "name": "mapped_ipv6_cidr_before_masking",
     "request": {
-      "initial": [
-        "::ffff:c000:201/0"
-      ]
+      "initial": ["::ffff:c000:201/0"]
     },
     "error": {
       "code": "unsupported_address",
@@ -703,9 +601,7 @@
   {
     "name": "zone_ipv6",
     "request": {
-      "initial": [
-        "fe80::1%eth0"
-      ]
+      "initial": ["fe80::1%eth0"]
     },
     "error": {
       "code": "unsupported_address",
@@ -730,9 +626,7 @@
   {
     "name": "invalid_prefix_length",
     "request": {
-      "initial": [
-        "::/129"
-      ]
+      "initial": ["::/129"]
     },
     "error": {
       "code": "invalid_ip",
@@ -752,9 +646,7 @@
   {
     "name": "operation_null",
     "request": {
-      "operations": [
-        null
-      ]
+      "operations": [null]
     },
     "error": {
       "code": "invalid_json",
@@ -764,9 +656,7 @@
   {
     "name": "number_value",
     "request": {
-      "initial": [
-        123
-      ]
+      "initial": [123]
     },
     "error": {
       "code": "invalid_json",
@@ -824,10 +714,7 @@
   {
     "name": "mapped_output_remains_separate_ipv6_space",
     "request": {
-      "initial": [
-        "::fffe:0:0/95",
-        "0.0.0.0/0"
-      ],
+      "initial": ["::fffe:0:0/95", "0.0.0.0/0"],
       "operations": [
         {
           "op": "remove",
@@ -836,10 +723,7 @@
       ]
     },
     "result": {
-      "cidrs": [
-        "0.0.0.0/0",
-        "::ffff:0.0.0.0/96"
-      ],
+      "cidrs": ["0.0.0.0/0", "::ffff:0.0.0.0/96"],
       "ranges": [
         {
           "family": "ipv4",

@@ -7,6 +7,6 @@
   "preview_urls": true,
   "keep_vars": true,
   "assets": {
-    "directory": "./web/dist"
-  }
+    "directory": "./web/dist",
+  },
 }
