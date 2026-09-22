@@ -24,7 +24,7 @@ export default defineConfig({
   }],
   build: {
     target: 'es2022',
-    rollupOptions: {
+    rolldownOptions: {
       input: {
         ja: fileURLToPath(new URL('./index.html', import.meta.url)),
         en: fileURLToPath(new URL('./en/index.html', import.meta.url)),
