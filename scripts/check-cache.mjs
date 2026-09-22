@@ -67,19 +67,22 @@ for (const locale of ['ja', 'en']) {
   }
 }
 assert.ok(assets.size > 0, 'The deployed HTML must reference compiled JavaScript/CSS assets.');
+const workers = new Set();
 for (const href of assets) {
   const url = new URL(href);
   assert.match(url.pathname, /\/assets\/[^/]+-[\w-]{6,}\.(?:js|css)$/, `${url}: expected a content-hashed filename`);
   const asset = await checkResource(url, 'hashed');
   // Vite emits the Worker URL into the main bundle rather than index.html.
   if (url.pathname.endsWith('.js')) {
-    for (const match of asset.body.toString('utf8').matchAll(/["']([^"'\s]*worker-[\w-]+\.js)["']/g)) {
+    for (const match of asset.body.toString('utf8').matchAll(/["'`]([^"'`\s]*worker-[\w-]+\.js)["'`]/g)) {
       const workerURL = new URL(match[1], asset.url);
       assert.equal(workerURL.origin, target.origin, 'The calculation Worker must be hosted with the UI.');
+      workers.add(workerURL.href);
       assets.add(workerURL.href);
     }
   }
 }
+assert.ok(workers.size > 0, 'The compiled JavaScript must reference a calculation Worker to check.');
 
 const wasm = await checkResource(new URL('wasm/core.wasm', deployment), 'wasm');
 assert.deepEqual(wasm.body.subarray(0, 4), Buffer.from([0, 97, 115, 109]), 'Expected an actual Wasm module.');

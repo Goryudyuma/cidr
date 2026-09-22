@@ -117,3 +117,14 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/cidr-playwright-browsers \
 ## Dependabot: Playwrightの更新
 
 2026年9月22日、Playwrightを1.62.1へ更新し、対応するChromium 151.0.7922.34で18テストが成功しました。日英UI・オフライン編集・サブディレクトリ配信と、共通37ケースのネイティブGo・HTTP・Wasmの一致を確認しています。Wasmと静的ファイルのビルド、ESLint、Prettierも成功しました。
+
+## Dependabot: Viteの更新
+
+2026年9月22日、Viteを8.2.2へ更新し、ビルド設定を`rolldownOptions`へ移行しました。
+
+- Node.js 24.7.0で依存の再インストール、ESLint、Prettier、型チェック、Wasm・フロントエンドのビルドが成功
+- 実Chromiumの18テストが成功。英語320px表示もスクリーンショットで確認
+- ローカルWranglerの配信で日英HTML、JavaScript、CSS、Worker、Wasm、Goランタイムの7リソースを検査し、一致するETagで304・空本文、不一致のETagで200・現在の本文を確認
+- 公開確認スクリプトをローカルWranglerへ実行し、共通37ケース、英語直リンク、オフラインの言語切替・編集が成功。ビルドと配信のWasm・ランタイムが一致し、ブラウザ実行時エラーは0件
+
+Vite 8がWorkerのURLをテンプレートリテラルで生成するため、キャッシュ検査も対応しました。WorkerのURLを検出できない場合は検査を失敗させ、Workerを確認せずに成功することを防ぎます。
