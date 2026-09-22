@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
 
 // Check the actual hosting layer: Vite preview does not apply Cloudflare _headers.
 // Run after deploying: node scripts/check-cache.mjs https://cidr.example.com/
@@ -17,6 +18,9 @@ deployment.hash = '';
 deployment.pathname = deployment.pathname.replace(/\/en(?:\/index\.html)?\/?$/, '/')
   .replace(/\/index\.html$/, '/').replace(/\/?$/, '/');
 const report = [];
+const retryDelays = [1000, 3000, 10_000, 20_000];
+
+class DeploymentChangedError extends Error {}
 
 async function request(url, headers = {}) {
   return fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
@@ -27,6 +31,18 @@ function cacheDirectives(response) {
 }
 
 async function checkResource(url, kind) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await checkResourceOnce(url, kind);
+    } catch (error) {
+      if (!(error instanceof DeploymentChangedError) || attempt >= retryDelays.length) throw error;
+      console.warn(`${error.message}; retrying in ${retryDelays[attempt]}ms (${attempt + 1}/${retryDelays.length}).`);
+      await setTimeout(retryDelays[attempt]);
+    }
+  }
+}
+
+async function checkResourceOnce(url, kind) {
   const first = await request(url);
   assert.equal(first.status, 200, `${url}: initial GET`);
   const body = Buffer.from(await first.arrayBuffer());
@@ -42,7 +58,21 @@ async function checkResource(url, kind) {
     assert.ok(!directives.has('immutable'), `${url}: fixed resource names must not be immutable`);
   }
 
+  // A deployment can replace a fixed URL between the three requests. Restart
+  // only when both the validator and decoded bytes prove a version change.
+  // An immutable URL changing, or a broken response for the same version, fails.
+  function detectDeploymentChange(response, candidate) {
+    const nextETag = response.headers.get('etag');
+    if (kind !== 'hashed' && nextETag && nextETag !== etag && !candidate.equals(body)) {
+      throw new DeploymentChangedError(`${url}: deployment changed from ${etag} to ${nextETag}`
+        + ` (CF-Ray=${response.headers.get('cf-ray') ?? 'none'}, CF-Cache-Status=${response.headers.get('cf-cache-status') ?? 'none'})`);
+    }
+  }
+
   const unchanged = await request(url, { 'If-None-Match': etag });
+  if (unchanged.status === 200) {
+    detectDeploymentChange(unchanged, Buffer.from(await unchanged.arrayBuffer()));
+  }
   assert.equal(unchanged.status, 304, `${url}: matching ETag must return 304`);
   assert.equal((await unchanged.arrayBuffer()).byteLength, 0, `${url}: 304 must not transfer a body`);
 
@@ -50,7 +80,9 @@ async function checkResource(url, kind) {
   // claiming that a second deployment has taken place during this check.
   const stale = await request(url, { 'If-None-Match': `"not-current-${randomUUID()}"` });
   assert.equal(stale.status, 200, `${url}: nonmatching ETag must fetch the current resource`);
-  assert.deepEqual(Buffer.from(await stale.arrayBuffer()), body, `${url}: must return the current resource body`);
+  const currentBody = Buffer.from(await stale.arrayBuffer());
+  detectDeploymentChange(stale, currentBody);
+  assert.ok(currentBody.equals(body), `${url}: must return the current resource body (ETag ${etag})`);
 
   report.push({ path: new URL(first.url).pathname, kind, etag, unchanged: 304, nonmatching: 200 });
   return { body, url: first.url };
