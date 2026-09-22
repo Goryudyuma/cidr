@@ -15,7 +15,7 @@ IPv4・IPv6の集合を編集するWebツールと、同じGoコアを使うHTTP
 | npm | 11.5.1 |
 | Vite | 7.3.6 |
 | TypeScript | 5.9.3 |
-| Playwright | 1.58.2 |
+| Playwright | 1.62.1 |
 | Wrangler | 4.136.1 |
 | ESLint / typescript-eslint | 10.11.0 / 8.70.1 |
 | Prettier | 3.9.8 |

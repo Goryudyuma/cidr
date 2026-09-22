@@ -113,3 +113,7 @@ node scripts/check-cache.mjs http://127.0.0.1:8789/en/
 PLAYWRIGHT_BROWSERS_PATH=/tmp/cidr-playwright-browsers \
   node scripts/smoke-deployment.mjs http://127.0.0.1:8789/en/
 ```
+
+## Dependabot: Playwrightの更新
+
+2026年9月22日、Playwrightを1.62.1へ更新し、対応するChromium 151.0.7922.34で18テストが成功しました。日英UI・オフライン編集・サブディレクトリ配信と、共通37ケースのネイティブGo・HTTP・Wasmの一致を確認しています。Wasmと静的ファイルのビルド、ESLint、Prettierも成功しました。
