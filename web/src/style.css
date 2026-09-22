@@ -41,6 +41,12 @@ code, .mono-input, textarea { font-family: var(--mono); }
 .engine-status[data-state='failed'] { background: #fff1ed; border-color: #ecd1c7; color: #a34930; }
 .engine-status[data-state='failed'] .status-dot { background: #b5543d; }
 .page-heading { display: flex; justify-content: space-between; align-items: flex-end; padding: 37px 0 29px; gap: 20px; }
+.heading-actions { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.heading-actions .button { white-space: nowrap; }
+.share-feedback { margin: -12px 0 22px; color: #65756c; font-size: 12px; line-height: 1.8; }
+#share-status:not(:empty) { color: var(--green-dark); margin-top: 6px; }
+#share-fallback { margin-top: 8px; max-width: 720px; }
+#share-fallback label { display: block; margin-bottom: 4px; }
 .eyebrow { color: #7c8982; font-size: 9px; letter-spacing: 1.6px; font-weight: 650; }
 h1 { font-size: clamp(22px, 2.2vw, 29px); letter-spacing: .015em; font-weight: 630; line-height: 1.6; margin: 7px 0 8px; }
 .page-description { color: #7a857f; font-size: 12px; letter-spacing: .02em; line-height: 1.8; }

@@ -4,6 +4,7 @@ import { getLocale, setLocale, localeURL, localeFromURL, type Locale } from './i
 import { text, type MessageKey } from './messages';
 import type { Operation, Request, Result } from './types';
 import { Visualization } from './visualization';
+import { decodeShare, encodeShare, ShareError, type SharedState } from './share';
 
 const label = (key: MessageKey): string => `<span data-i18n="${key}">${text(key)}</span>`;
 
@@ -21,8 +22,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
     <main>
       <div class="page-heading">
         <div><p class="eyebrow">IP ADDRESS WORKSPACE</p><h1>${label('heading')}</h1><p class="page-description">${label('introduction')}</p></div>
-        <button id="reset-set" class="button button-quiet" type="button" disabled><span aria-hidden="true">↺</span> ${label('reset')}</button>
+        <div class="heading-actions"><button id="copy-share" class="button button-quiet" type="button" aria-describedby="share-help" disabled><span aria-hidden="true">⧉</span> ${label('share')}</button><button id="reset-set" class="button button-quiet" type="button" disabled><span aria-hidden="true">↺</span> ${label('reset')}</button></div>
       </div>
+      <div class="share-feedback"><p id="share-help" data-i18n="shareHelp">${text('shareHelp')}</p><p id="share-status" role="status"></p><div id="share-fallback" hidden><label for="share-link" data-i18n="shareLink">${text('shareLink')}</label><input id="share-link" class="mono-input" readonly spellcheck="false" /></div></div>
       <div id="error-banner" class="error-banner" role="alert" hidden></div>
 
       <div class="workspace">
@@ -109,6 +111,37 @@ let elapsedMS = 0;
 let copyState: 'copied' | 'copyFailed' | undefined;
 let visibleError: unknown;
 let zoomFailure: unknown;
+let shareState: MessageKey | undefined;
+let shareBusy = false;
+let shareGeneration = 0;
+let restoring = false;
+let observedHash = window.location.hash;
+
+function setShareStatus(state?: MessageKey): void {
+  shareState = state;
+  $('#share-status').textContent = state ? text(state) : '';
+}
+
+function clearShareFeedback(): void {
+  shareGeneration++;
+  shareBusy = false;
+  setShareStatus();
+  $('#share-fallback').hidden = true;
+  $<HTMLInputElement>('#share-link').value = '';
+}
+
+function shareError(error: unknown): void {
+  setShareStatus(error instanceof ShareError
+    ? error.code === 'tooLarge' ? 'shareTooLarge' : error.code === 'unsupported' ? 'shareUnsupported' : 'shareInvalid'
+    : 'shareInvalid');
+}
+
+function updateLanguageLinks(): void {
+  for (const locale of ['ja', 'en'] as const) {
+    const url = localeURL(locale); url.hash = window.location.hash;
+    $<HTMLAnchorElement>(`#language-${locale}`).href = url.href;
+  }
+}
 
 function setResultStatus(state: MessageKey): void {
   resultState = state;
@@ -133,6 +166,7 @@ function refreshLocale(): void {
     }
   }
   $<HTMLAnchorElement>('.brand').href = localeURL(getLocale()).pathname;
+  updateLanguageLinks();
   for (const locale of ['ja', 'en'] as const) {
     document.querySelector<HTMLLinkElement>(`link[rel="alternate"][hreflang="${locale}"]`)!.href = localeURL(locale).pathname;
     const link = $<HTMLAnchorElement>(`#language-${locale}`);
@@ -145,6 +179,7 @@ function refreshLocale(): void {
   updateControls();
   setResultStatus(resultState);
   if (copyState) setCopyStatus(copyState);
+  setShareStatus(shareState);
   if (!errorBanner.hidden) errorBanner.textContent = formatEngineError(visibleError);
   if (!$('#zoom-error').hidden) $('#zoom-error').textContent = formatEngineError(zoomFailure);
 }
@@ -166,7 +201,17 @@ for (const locale of ['ja', 'en'] as const) {
     changeLocale(locale);
   });
 }
-window.addEventListener('popstate', () => changeLocale(localeFromURL()));
+function followLocation(): void {
+  changeLocale(localeFromURL());
+  const hash = window.location.hash;
+  if (hash === observedHash) return;
+  const wasShared = observedHash.startsWith('#s=');
+  observedHash = hash;
+  updateLanguageLinks();
+  if (hash.startsWith('#s=') || wasShared) void restoreShare(hash);
+}
+window.addEventListener('popstate', followLocation);
+window.addEventListener('hashchange', followLocation);
 
 function inputLines(): string[] { return initialInput.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean); }
 function isDraft(): boolean { return JSON.stringify(inputLines()) !== JSON.stringify(initial); }
@@ -178,6 +223,7 @@ function updateControls(): void {
   $<HTMLButtonElement>('#reset-set').disabled = !ready;
   $<HTMLButtonElement>('#zoom-submit').disabled = !ready || !zoomInput.value.trim();
   $<HTMLButtonElement>('#copy-cidrs').disabled = !ready || result.cidrs.length === 0;
+  $<HTMLButtonElement>('#copy-share').disabled = !ready || busy || shareBusy;
   $('#draft-status').textContent = ready && isDraft() ? text('draft') : '';
   const status = $('#engine-status');
   status.dataset.state = failed ? 'failed' : busy || !ready ? 'loading' : 'ready';
@@ -195,6 +241,8 @@ function clearError(): void { errorBanner.hidden = true; errorBanner.textContent
 function invalidatePending(): void {
   generation++;
   zoomGeneration++;
+  restoring = false;
+  clearShareFeedback();
   if (busy) setResultStatus('canceled');
   busy = false;
   updateControls();
@@ -202,6 +250,8 @@ function invalidatePending(): void {
 
 async function evaluate(request: Request, afterCommit?: () => void): Promise<void> {
   const current = ++generation;
+  restoring = false;
+  clearShareFeedback();
   zoomGeneration++;
   busy = true;
   clearError();
@@ -227,6 +277,58 @@ async function evaluate(request: Request, afterCommit?: () => void): Promise<voi
     setResultStatus('invalid');
   } finally {
     if (current === generation) { busy = false; updateControls(); }
+  }
+}
+
+function clearWorkspace(): void {
+  initial = []; operations = [];
+  result = { cidrs: [], ranges: [], addressCount: { ipv4: '0', ipv6: '0' } };
+  initialInput.value = ''; operationInput.value = ''; zoomInput.value = '';
+  cidrPage = rangePage = historyPage = 0;
+  $('#zoom-error').hidden = true;
+  copyState = undefined; $('#copy-status').textContent = '';
+  visualization.setMode('fit'); setViewButton('fit'); switchTab('cidrs');
+  clearError(); renderResult();
+}
+
+async function restoreShare(hash: string): Promise<void> {
+  const current = ++generation;
+  zoomGeneration++;
+  clearShareFeedback(); clearWorkspace();
+  restoring = true; busy = true;
+  setShareStatus('shareRestoring'); updateControls();
+  const started = performance.now();
+  try {
+    const shared = await decodeShare(hash);
+    if (current !== generation) return;
+    await engine.ready;
+    if (current !== generation) return;
+    if (!shared) { setShareStatus(); setResultStatus('complete'); return; }
+    // Validate and recalculate with the same Go core as every other edit.
+    const evaluated = await engine.evaluate(shared.request);
+    if (current !== generation) return;
+    initial = [...shared.request.initial]; operations = shared.request.operations.map((op) => ({ ...op }));
+    result = evaluated;
+    initialInput.value = shared.inputs.initial;
+    operationInput.value = shared.inputs.operation;
+    zoomInput.value = shared.inputs.zoom;
+    const clampPage = (page: number, count: number, size: number): number => Math.min(page, Math.max(0, Math.ceil(count / size) - 1));
+    cidrPage = clampPage(shared.output.cidrPage, result.cidrs.length, pageSize);
+    rangePage = clampPage(shared.output.rangePage, result.ranges.length, pageSize);
+    historyPage = clampPage(shared.output.historyPage, operations.length, historyPageSize);
+    renderResult();
+    visualization.restoreView(shared.view);
+    setViewButton(Object.keys(shared.view.viewports).length ? 'custom' : shared.view.mode);
+    switchTab(shared.output.tab);
+    elapsedMS = Math.max(1, Math.round(performance.now() - started));
+    setResultStatus('complete'); setShareStatus('shareRestored');
+  } catch (error) {
+    if (current !== generation) return;
+    shareError(error);
+    if (!(error instanceof ShareError)) showError(error);
+    setResultStatus('invalid');
+  } finally {
+    if (current === generation) { restoring = false; busy = false; updateControls(); }
   }
 }
 
@@ -303,7 +405,7 @@ function renderResult(): void {
 
 initialInput.addEventListener('input', invalidatePending);
 operationInput.addEventListener('input', invalidatePending);
-zoomInput.addEventListener('input', () => { zoomGeneration++; $('#zoom-error').hidden = true; updateControls(); });
+zoomInput.addEventListener('input', () => { if (restoring) invalidatePending(); zoomGeneration++; $('#zoom-error').hidden = true; updateControls(); });
 $('#apply-initial').addEventListener('click', () => { void evaluate({ initial: inputLines(), operations: [] }); });
 
 for (const op of ['add', 'remove'] as const) {
@@ -315,9 +417,11 @@ for (const op of ['add', 'remove'] as const) {
 }
 
 $('#reset-set').addEventListener('click', () => {
-  initialInput.value = ''; operationInput.value = ''; zoomInput.value = '';
-  $('#zoom-error').hidden = true;
-  visualization.setMode('fit'); setViewButton('fit');
+  if (window.location.hash.startsWith('#s=')) {
+    const url = new URL(window.location.href); url.hash = '';
+    history.replaceState(null, '', url); observedHash = ''; updateLanguageLinks();
+  }
+  clearWorkspace();
   void evaluate({ initial: [], operations: [] });
 });
 
@@ -335,7 +439,7 @@ function setViewButton(mode: 'fit' | 'all' | 'custom'): void {
 }
 
 for (const mode of ['fit', 'all'] as const) {
-  $(`#view-${mode}`).addEventListener('click', () => { zoomGeneration++; visualization.setMode(mode); setViewButton(mode); $('#zoom-error').hidden = true; });
+  $(`#view-${mode}`).addEventListener('click', () => { if (restoring) invalidatePending(); zoomGeneration++; visualization.setMode(mode); setViewButton(mode); $('#zoom-error').hidden = true; });
 }
 
 $('#zoom-form').addEventListener('submit', async (event) => {
@@ -378,11 +482,46 @@ $('#copy-cidrs').addEventListener('click', async () => {
   catch { setCopyStatus('copyFailed'); }
 });
 
+$('#copy-share').addEventListener('click', async () => {
+  if (!ready || busy || shareBusy) return;
+  clearShareFeedback();
+  const current = shareGeneration;
+  const snapshot: SharedState = {
+    version: 1,
+    request: { initial: [...initial], operations: operations.map((op) => ({ ...op })) },
+    inputs: { initial: initialInput.value, operation: operationInput.value, zoom: zoomInput.value },
+    view: visualization.exportView(),
+    output: { tab: $('#ranges-panel').hidden ? 'cidrs' : 'ranges', cidrPage, rangePage, historyPage },
+  };
+  // Capture the locale at click time, just like the rest of the snapshot.
+  const url = localeURL(getLocale());
+  shareBusy = true; setShareStatus('shareCreating'); updateControls();
+  try {
+    url.hash = await encodeShare(snapshot);
+    if (current !== shareGeneration) return;
+    try {
+      await navigator.clipboard.writeText(url.href);
+      if (current === shareGeneration) setShareStatus('shareCopied');
+    } catch {
+      if (current !== shareGeneration) return;
+      const input = $<HTMLInputElement>('#share-link'); input.value = url.href;
+      $('#share-fallback').hidden = false;
+      setShareStatus('shareCopyFailed'); input.focus(); input.select();
+    }
+  } catch (error) {
+    if (current === shareGeneration) shareError(error);
+  } finally {
+    if (current === shareGeneration) { shareBusy = false; updateControls(); }
+  }
+});
+
 window.addEventListener('pagehide', () => engine.dispose(), { once: true });
 renderResult(); refreshLocale();
+const startsWithShare = observedHash.startsWith('#s=');
+if (startsWithShare) void restoreShare(observedHash);
 void engine.ready.then(async () => {
   ready = true; updateControls();
-  await evaluate({ initial: inputLines(), operations: [] });
+  if (!startsWithShare && !restoring) await evaluate({ initial: inputLines(), operations: [] });
 }).catch((error: unknown) => {
   failed = true; ready = false; showError(error); updateControls();
   setResultStatus('failed');
