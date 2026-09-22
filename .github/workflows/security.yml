@@ -13,7 +13,7 @@ defaults:
 jobs:
   dependencies:
     name: Dependency vulnerabilities
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out source
@@ -51,7 +51,7 @@ jobs:
 
   secrets:
     name: Secret scan
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check out complete history

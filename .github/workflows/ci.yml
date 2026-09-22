@@ -23,7 +23,7 @@ defaults:
 jobs:
   quality:
     name: Lint and format
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out source
@@ -70,7 +70,7 @@ jobs:
 
   test:
     name: Build and runtime tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       CI: "true"
@@ -130,7 +130,7 @@ jobs:
     name: Go, Wasm and browser tests
     needs: [quality, security, test]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every check to succeed
@@ -144,7 +144,7 @@ jobs:
     name: Deploy frontend to Cloudflare
     needs: checks
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
       group: cidr-production

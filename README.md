@@ -107,6 +107,8 @@ npm run test:cache -- https://cidr.goryudyuma.workers.dev/
 
 ### GitHub Actions
 
+実行環境は`ubuntu-latest`を使い、GitHubが提供するUbuntuランナーの更新に追従します。
+
 `.github/workflows/ci.yml`は次のタイミングで動きます。
 
 | トリガー | 処理 |
