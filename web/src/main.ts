@@ -66,7 +66,13 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         </div>
       </div>
     </main>
-    <footer class="site-footer"><span>CIDR Studio</span><span>IPv4 + IPv6 <span aria-hidden="true">/</span> 集合演算・CIDR集約</span></footer>
+    <footer class="site-footer">
+      <div class="footer-info"><span class="footer-brand">CIDR Studio</span><span>IPv4 + IPv6 · 集合演算・CIDR集約</span></div>
+      <a class="sponsor-link" href="https://github.com/sponsors/Goryudyuma" target="_blank" rel="noopener noreferrer" aria-label="GitHub Sponsorsで支援（新しいタブで開きます）">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" /></svg>
+        GitHub Sponsorsで支援 <span aria-hidden="true">↗</span>
+      </a>
+    </footer>
   </div>`;
 
 const $ = <T extends HTMLElement>(selector: string): T => document.querySelector<T>(selector)!;
