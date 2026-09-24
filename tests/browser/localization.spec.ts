@@ -19,6 +19,14 @@ async function apply(page: Page, input: string): Promise<void> {
   await expect(page.locator('#result-status')).toContainText('Calculation complete');
 }
 
+async function openPanel(page: Page, name: 'operations' | 'visualization' | 'ranges'): Promise<void> {
+  const panel = page.locator(`#${name}-details`);
+  if (!await panel.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await panel.locator(':scope > summary').click();
+  }
+  await expect(panel).toHaveJSProperty('open', true);
+}
+
 async function expectEnglishUI(page: Page): Promise<void> {
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   const content = await page.evaluate(() => {
@@ -49,7 +57,7 @@ async function editorState(page: Page) {
       selectedBounds: values('#range-detail .detail-bounds dd'),
       selectedCidrs: values('#range-detail .related-cidrs code'),
       axes: values('.plot-axis'),
-      activeTab: document.querySelector('[role="tab"][aria-selected="true"]')!.id,
+      panels: ['operations', 'visualization', 'ranges'].map((name) => document.querySelector<HTMLDetailsElement>(`#${name}-details`)!.open),
       fit: document.querySelector('#view-fit')!.getAttribute('aria-pressed'),
       all: document.querySelector('#view-all')!.getAttribute('aria-pressed'),
       selectedMarks: Array.from(document.querySelectorAll('.range-band.selected'), (element) => element.getAttribute('data-range-index')),
@@ -81,8 +89,10 @@ test('English is available directly and after reload, with real Wasm edits and c
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await page.locator('#load-example').click();
   await expect(page.locator('#cidr-list code')).toHaveText(sampleCidrs);
+  await openPanel(page, 'visualization');
   await page.locator('#plot-ipv4 .range-band').first().hover();
   await expect(page.locator('#range-detail')).toContainText('192.0.2.0/31');
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#add-operation').click();
   await expect(page.locator('#cidr-list code')).toHaveText(['192.0.2.0/30', '192.0.2.6/31']);
@@ -106,6 +116,7 @@ test('offline language changes and browser history preserve drafts, edits, selec
   await page.locator('#initial-input').fill(initial);
   await page.locator('#apply-initial').click();
   await expect(page.locator('#count-ipv4')).toHaveText('85');
+  await openPanel(page, 'operations');
   for (let index = 0; index < 12; index++) {
     await page.locator('#operation-input').fill(`192.0.2.${index * 2}`);
     await page.locator('#add-operation').click();
@@ -114,7 +125,7 @@ test('offline language changes and browser history preserve drafts, edits, selec
   await expect(page.locator('#history-pagination span')).toContainText('11–12 / 12');
   await page.locator('#cidr-pagination button').last().click();
   await expect(page.locator('#cidr-list code').first()).toHaveText('10.0.40.1/32');
-  await page.locator('#tab-ranges').click();
+  await openPanel(page, 'ranges');
   await page.locator('#range-pagination button').last().click();
   await page.locator('#range-list button').first().click();
   await page.locator('#range-detail button').first().click();
@@ -157,12 +168,14 @@ test('English calculation and zoom errors preserve the current set and survive a
   await ready(page);
   await apply(page, '192.0.2.7/24');
   await expect(page.locator('#cidr-list code')).toHaveText(['192.0.2.0/24']);
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('::ffff:192.0.2.1');
   await page.locator('#remove-operation').click();
   await expect(page.locator('#error-banner')).toContainText('unsupported_address');
   await expect(page.locator('#error-banner')).toContainText('operations[0].value');
   await expect(page.locator('#count-ipv4')).toHaveText('256');
   await expect(page.locator('#operation-count')).toHaveText('0');
+  await openPanel(page, 'visualization');
   await page.locator('#zoom-input').fill('fe80::1%en0');
   await page.locator('#zoom-submit').click();
   await expect(page.locator('#zoom-error')).toBeVisible();

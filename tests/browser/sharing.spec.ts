@@ -9,6 +9,14 @@ async function ready(page: Page, path = '/'): Promise<void> {
   await expect(page.locator('#result-status')).toContainText(path.startsWith('/en') ? 'Calculation complete' : '計算完了');
 }
 
+async function openPanel(page: Page, name: 'operations' | 'visualization' | 'ranges'): Promise<void> {
+  const panel = page.locator(`#${name}-details`);
+  if (!await panel.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await panel.locator(':scope > summary').click();
+  }
+  await expect(panel).toHaveJSProperty('open', true);
+}
+
 async function copyShareLink(page: Page): Promise<string> {
   await page.evaluate(() => navigator.clipboard.writeText(''));
   await page.locator('#copy-share').click();
@@ -95,7 +103,6 @@ async function editorSnapshot(page: Page) {
       viewLabels: texts('.viewport-label'),
       selected: Array.from(document.querySelectorAll('.range-band.selected'), (element) => element.getAttribute('data-range-index')),
       ipv6Marks: Array.from(document.querySelectorAll('#plot-ipv6 .range-band'), (element) => ({ x: element.getAttribute('x'), width: element.getAttribute('width') })),
-      tab: document.querySelector('[role="tab"][aria-selected="true"]')!.id,
       viewButtons: ['#view-fit', '#view-all'].map((selector) => document.querySelector(selector)!.getAttribute('aria-pressed')),
     };
   });
@@ -113,6 +120,7 @@ test('a copied link restores applied edits, drafts, IPv6 precision, selection an
   await page.locator('#initial-input').fill(initial.join('\n'));
   await page.locator('#apply-initial').click();
   await expect(page.locator('#count-ipv4')).toHaveText('89');
+  await openPanel(page, 'operations');
   const operations = Array.from({ length: 11 }, (_, index) => ({ op: index % 2 === 0 ? 'remove' : 'add', value: '192.0.2.1' }));
   for (const [index, operation] of operations.entries()) {
     await page.locator('#operation-input').fill(operation.value);
@@ -124,9 +132,10 @@ test('a copied link restores applied edits, drafts, IPv6 precision, selection an
   await page.locator('#history-pagination button').first().click();
   await page.locator('#cidr-pagination button').last().click();
   await expect(page.locator('#cidr-list code').first()).toHaveText('10.0.40.1/32');
-  await page.locator('#tab-ranges').click();
+  await openPanel(page, 'ranges');
   await page.locator('#range-pagination button').last().click();
   await page.locator('#range-pagination button').last().click();
+  await openPanel(page, 'visualization');
   await page.locator('#view-all').click();
   await page.locator('#range-list button').last().click();
   const zoom = 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fff0/124';
@@ -148,7 +157,7 @@ test('a copied link restores applied edits, drafts, IPv6 precision, selection an
   expect(saved.view.mode).toBe('all');
   expect(saved.view.viewports.ipv6.start).toBe(((1n << 128n) - 16n).toString());
   expect(saved.view.viewports.ipv6.end).toBe(((1n << 128n) - 1n).toString());
-  expect(saved.output).toEqual({ tab: 'ranges', cidrPage: 1, rangePage: 2, historyPage: 0 });
+  expect(saved.output).toEqual({ tab: 'cidrs', cidrPage: 1, rangePage: 2, historyPage: 0 });
   const before = await editorSnapshot(page);
   const restored = await context.newPage();
   await restored.goto(link);
@@ -271,7 +280,7 @@ test('valid large page indexes clamp to the restored result instead of leaving e
   await expect(page.locator('#range-list code').last()).toHaveText('10.0.84.1 → 10.0.84.1');
   await expect(page.locator('#operation-history .history-index')).toHaveText(['11']);
   await expect(page.locator('#range-detail .related-cidrs code')).toHaveText(['10.0.0.1/32']);
-  await expect(page.locator('#tab-ranges')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#ranges-details')).toHaveJSProperty('open', true);
 });
 
 test('a compressible draft larger than 1 MiB can be shared without changing the applied set', async ({ page, context }) => {
@@ -298,7 +307,12 @@ test('a compressible draft larger than 1 MiB can be shared without changing the 
   await expect(restored.locator('#share-status')).toHaveText('共有された内容を復元しました。');
   await expect(restored.locator('#initial-input')).toHaveValue(draft);
   await expect(restored.locator('#count-ipv4')).toHaveText('5');
-  await page.locator('#initial-input').fill(applied);
+  // Replace the large draft without routing its removal through OS text input.
+  await page.locator('#initial-input').evaluate((element, value) => {
+    (element as HTMLTextAreaElement).value = value;
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  }, applied);
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#add-operation').click();
   await expect(page.locator('#count-ipv4')).toHaveText('6');
@@ -328,6 +342,7 @@ test('editing during real Wasm initialization prevents an older shared state fro
     await expect(page.locator('#cidr-count')).toHaveText('0');
     await page.locator('#apply-initial').click();
     await expect(page.locator('#cidr-list code')).toHaveText(['203.0.113.9/32']);
+    await openPanel(page, 'visualization');
     await page.locator('#zoom-input').fill('203.0.113.0/24');
     await page.locator('#zoom-submit').click();
     await expect(page.locator('#plot-ipv4 .viewport-label')).toHaveText('203.0.113.0/24');
@@ -364,6 +379,7 @@ test('reset cancels a new shared state started by a real hashchange', async ({ p
   await expect(page.locator('#initial-input')).toHaveValue('');
   await expect(page.locator('#cidr-count')).toHaveText('0');
   // A real Worker request forms a completion barrier after the reset.
+  await openPanel(page, 'visualization');
   await page.locator('#zoom-input').fill('203.0.113.0/24');
   await page.locator('#zoom-submit').click();
   await expect(page.locator('#plot-ipv4 .viewport-label')).toHaveText('203.0.113.0/24');
@@ -472,9 +488,9 @@ test('frozen version 2 gzip and Brotli links remain readable by the real Wasm co
       await expect(page.locator('#share-status')).toHaveText('共有された内容を復元しました。');
       await expect(page.locator('#cidr-list code')).toHaveText(fixture.cidrs);
       await expect(page.locator('#count-ipv4')).toHaveText('5');
-      await expect(page.locator('#tab-ranges')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('#ranges-details')).toHaveJSProperty('open', true);
       const copied = await copyShareLink(page);
-      expect(decodeLink(page, copied)).toEqual(fixture.state);
+      expect(decodeLink(page, copied)).toEqual({ ...fixture.state, output: { ...fixture.state.output, tab: 'cidrs' } });
     });
   }
 });
