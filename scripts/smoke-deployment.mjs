@@ -17,6 +17,20 @@ const fixtures = JSON.parse(await readFile(new URL('testdata/evaluate.json', roo
 const workerFile = (await readdir(new URL('web/dist/assets/', root))).find((name) => /^worker-.*\.js$/.test(name));
 if (!workerFile) throw new Error('Run npm run build before checking a deployment.');
 
+async function openPanel(page, name) {
+  const panel = page.locator(`#${name}-details`);
+  if (!await panel.evaluate((element) => element.open)) {
+    await panel.locator(':scope > summary').click();
+  }
+  await expect(panel).toHaveJSProperty('open', true);
+}
+
+async function expectClosedPanels(page) {
+  for (const name of ['operations', 'visualization', 'ranges']) {
+    await expect(page.locator(`#${name}-details`)).toHaveJSProperty('open', false);
+  }
+}
+
 // Verify that production serves the exact matching Go module and runtime.
 for (const path of ['wasm/core.wasm', 'wasm/wasm_exec.js']) {
   const response = await fetch(new URL(path, deployment), { signal: AbortSignal.timeout(30_000) });
@@ -37,6 +51,7 @@ try {
   await expect(page.locator('html')).toHaveAttribute('lang', 'ja');
   await expect(page.locator('#engine-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
   await expect(page.locator('#result-status')).toContainText('計算完了');
+  await expectClosedPanels(page);
 
   const responses = await page.evaluate(async ({ fixtures, workerFile, deploymentURL }) => {
     const worker = new Worker(new URL(`assets/${workerFile}`, deploymentURL), { type: 'module' });
@@ -78,12 +93,14 @@ try {
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.locator('#engine-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
   await expect(page.locator('#result-status')).toContainText('Calculation complete');
+  await expectClosedPanels(page);
   assert.equal(requests.some((url) => /\/api\//.test(new URL(url).pathname)), false);
   requests.length = 0;
   await context.setOffline(true);
   await page.locator('#load-example').click();
   await expect(page.locator('#count-ipv4')).toHaveText('5');
   await expect(page.locator('#cidr-list code')).toHaveText(['192.0.2.0/31', '192.0.2.2/32', '192.0.2.6/31']);
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#add-operation').click();
   await expect(page.locator('#count-ipv4')).toHaveText('6');
@@ -95,6 +112,7 @@ try {
   const draftInitial = `${appliedInitial}\n203.0.113.9`;
   await page.locator('#initial-input').fill(draftInitial);
   await page.locator('#operation-input').fill('2001:db8::1');
+  await openPanel(page, 'visualization');
   await page.locator('#zoom-input').fill('192.0.2.0/24');
   const operationCount = await page.locator('#operation-count').textContent();
   const cidrs = await page.locator('#cidr-list code').allTextContents();
@@ -109,6 +127,9 @@ try {
     await expect(page.locator('#operation-count')).toHaveText(operationCount);
     await expect(page.locator('#count-ipv4')).toHaveText('6');
     await expect(page.locator('#cidr-list code')).toHaveText(cidrs);
+    await expect(page.locator('#operations-details')).toHaveJSProperty('open', true);
+    await expect(page.locator('#visualization-details')).toHaveJSProperty('open', true);
+    await expect(page.locator('#ranges-details')).toHaveJSProperty('open', false);
     await page.screenshot({ path: fileURLToPath(new URL(`test-results/production-${locale}.png`, root)), fullPage: true });
   }
   // Existing state remains usable after switching languages while offline.
@@ -130,7 +151,7 @@ try {
   await page.locator('#initial-input').fill(draftInitial);
   await page.locator('#operation-input').fill('203.0.113.77');
   await page.locator('#zoom-input').fill('2001:db8::/120');
-  await page.locator('#tab-ranges').click();
+  await openPanel(page, 'ranges');
   const sharedCIDRs = await page.locator('#cidr-list code').allTextContents();
   const sharedHistory = await page.locator('#operation-history li').allTextContents();
   await page.locator('#copy-share').click();
@@ -156,6 +177,7 @@ try {
     await restored.goto(formattedShareLink, { waitUntil: 'networkidle', timeout: 60_000 });
     await expect(restored.locator('#engine-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
     await expect(restored.locator('#share-status')).toHaveText('Shared contents restored.');
+    await expectClosedPanels(restored);
     await expect(restored.locator('#initial-input')).toHaveValue(appliedInitial);
     await expect(restored.locator('#draft-status')).toBeEmpty();
     await expect(restored.locator('#count-ipv4')).toHaveText('6');
@@ -165,6 +187,7 @@ try {
     await expect(restored.locator('#operation-count')).toHaveText('4');
     await expect(restored.locator('#operation-input')).toHaveValue('');
     await expect(restored.locator('#zoom-input')).toHaveValue('192.0.2.0/24');
+    await openPanel(restored, 'operations');
     await restored.locator('#operation-input').fill('192.0.2.3');
     await expect(restored.locator('#remove-operation')).toBeEnabled();
     await restored.locator('#remove-operation').click();
@@ -184,8 +207,9 @@ try {
     await expect(restored.locator('#initial-input')).toHaveValue(draftInitial);
     await expect(restored.locator('#operation-input')).toHaveValue('203.0.113.77');
     await expect(restored.locator('#zoom-input')).toHaveValue('2001:db8::/120');
+    await openPanel(restored, 'visualization');
     await expect(restored.locator('#plot-ipv4 .viewport-label')).toHaveText('192.0.2.0/24');
-    await expect(restored.locator('#tab-ranges')).toHaveAttribute('aria-selected', 'true');
+    await expect(restored.locator('#ranges-details')).toHaveJSProperty('open', false);
     await expect(restored.locator('#draft-status')).not.toBeEmpty();
     await expect(restored.locator('#add-operation')).toBeDisabled();
     assert.ok(restoredRequests.some(({ url }) => new URL(url).pathname === new URL('wasm/core.wasm', deployment).pathname),
@@ -202,5 +226,6 @@ try {
   console.log(JSON.stringify({ url: deployment.href, fixtures: fixtures.length, matchingWasmRuntime: true,
     englishDirectAccess: true, offlineEditing: true, offlineLanguageSwitch: true, preservedEdits: true,
     offlineShareLink: true, sharedStateRestored: true, sharedInputFormattingPreserved: true,
+    panelsInitiallyClosed: true, panelPreferencesExcludedFromSharing: true,
     screenshots: ['test-results/production-ja.png', 'test-results/production-en.png'], browserErrors: errors }, null, 2));
 } finally { await browser.close(); }

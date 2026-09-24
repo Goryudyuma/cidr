@@ -43,6 +43,10 @@ Lengths count JavaScript UTF-16 code units. Prefix and suffix must be nonnegativ
 
 `view` and `output` contain the validated view and pagination structures in `web/src/share.ts`. IPv4 and IPv6 viewport endpoints are canonical decimal strings, converted to BigInt for validation and drawing. Unknown fields, invalid tuples, unsafe integers and invalid coordinates are rejected. Out-of-range selection and pagination are adjusted to the evaluated result when displayed.
 
+`output.tab` remains part of schema 2 and accepts `cidrs` or `ranges`. The current UI always displays CIDRs and writes `cidrs` for new links. When restoring a previously published link with `ranges`, it opens the continuous-ranges panel to preserve access to the selected result view. This UI change does not alter the serialized schema.
+
+The operations, visualization and ranges panels use native `details` elements. Their open states are browser preferences, excluded from shared snapshots. The UI stores `{operations, visualization, ranges}` as booleans under `localStorage` key `cidr.panel-preferences.v1`, shared by both language pages. Without saved preferences, all three panels start closed. Restoring a legacy `output.tab: "ranges"` opens the ranges panel; other panels retain the recipient's preferences.
+
 ## Compression and limits
 
 The existing Worker uses the Go Wasm module for both codecs. The encoder compares gzip and Brotli output and selects the shorter valid result. Browser-native compression APIs are not needed. Go codec code is separate from the IP-set core and HTTP API. Schema 2 Brotli uses quality 6 and a 22-bit window; decoders reject larger windows and the large-window extension before allocating a history buffer larger than 4 MiB.

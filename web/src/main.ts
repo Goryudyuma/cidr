@@ -1,10 +1,11 @@
 import './style.css';
-import { Engine, formatEngineError } from './engine';
+import { Engine, EngineError, formatEngineError } from './engine';
 import { getLocale, setLocale, localeURL, localeFromURL, type Locale } from './i18n';
 import { text, type MessageKey } from './messages';
 import type { Operation, Request, Result } from './types';
 import { Visualization } from './visualization';
 import { ShareError, type SharedState } from './share';
+import { initializePanels } from './panels';
 
 const label = (key: MessageKey): string => `<span data-i18n="${key}">${text(key)}</span>`;
 
@@ -39,8 +40,9 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <p id="draft-status" class="draft-status" aria-live="polite"></p>
           </section>
 
-          <section class="panel operation-panel">
-            <div class="section-heading"><div><span class="step-number">02</span><h2>${label('edit')}</h2></div></div>
+          <details id="operations-details" class="panel disclosure operation-panel">
+            <summary class="panel-summary"><span class="summary-heading"><span class="summary-title">${label('edit')}</span><span id="operation-summary" class="summary-meta" aria-live="polite"></span></span><span class="disclosure-chevron" aria-hidden="true"></span></summary>
+            <div class="panel-content">
             <label for="operation-input" class="field-label" data-i18n="operationInput">${text('operationInput')}</label>
             <input id="operation-input" class="mono-input" spellcheck="false" autocomplete="off" placeholder="192.0.2.64/26" aria-describedby="operation-help" />
             <div class="operation-buttons"><button id="add-operation" class="button button-add" type="button" disabled><span aria-hidden="true">＋</span> ${label('add')}</button><button id="remove-operation" class="button button-remove" type="button" disabled><span aria-hidden="true">−</span> ${label('remove')}</button></div>
@@ -48,7 +50,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <div class="history-heading"><h3>${label('history')}</h3><span id="operation-count" class="count-badge">0</span></div>
             <ol id="operation-history" class="operation-history"></ol>
             <div id="history-pagination" class="pagination" hidden></div>
-          </section>
+            </div>
+          </details>
           <p class="local-note"><span class="local-icon" aria-hidden="true">◈</span><span>${label('localCalculation')}<br> ${label('privateInput')}</span></p>
         </aside>
 
@@ -59,20 +62,27 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
             <div class="stat stat-compact"><span class="stat-label">${label('cidrs')}</span><strong id="cidr-count" class="stat-value">0</strong><span class="stat-unit">prefixes</span></div>
           </section>
 
-          <section class="panel visualization-panel" aria-labelledby="visualization-heading">
-            <div class="visualization-heading"><div><span class="eyebrow">ADDRESS SPACE</span><h2 id="visualization-heading">${label('overview')}</h2></div><div class="segmented-control" data-i18n-aria="viewport" aria-label="${text('viewport')}"><button id="view-fit" type="button" class="active" aria-pressed="true">${label('fit')}</button><button id="view-all" type="button" aria-pressed="false">${label('all')}</button></div></div>
+          <section class="panel output-panel" data-i18n-aria="results" aria-label="${text('results')}">
+            <div class="output-heading"><h2 id="cidrs-heading">${label('cidrs')} <span id="cidr-tab-count" class="count-badge">0</span></h2><button id="copy-cidrs" class="text-button" type="button" disabled>${label('copy')} <span aria-hidden="true">⧉</span></button></div>
+            <div id="cidrs-panel" aria-labelledby="cidrs-heading"><div class="output-table-heading"><span>NETWORK / PREFIX</span><span>FAMILY</span></div><ol id="cidr-list" class="cidr-list"></ol><div id="cidr-pagination" class="pagination" hidden></div></div>
+            <div class="output-footer"><span id="result-status" role="status">${text('waiting')}</span><span id="copy-status" role="status"></span></div>
+          </section>
+
+          <details id="visualization-details" class="panel disclosure visualization-panel">
+            <summary class="panel-summary"><span class="summary-title">${label('overview')}</span><span class="disclosure-chevron" aria-hidden="true"></span></summary>
+            <div class="panel-content">
+            <div class="visualization-heading"><span class="eyebrow">ADDRESS SPACE</span><div class="segmented-control" data-i18n-aria="viewport" aria-label="${text('viewport')}"><button id="view-fit" type="button" class="active" aria-pressed="true">${label('fit')}</button><button id="view-all" type="button" aria-pressed="false">${label('all')}</button></div></div>
             <form id="zoom-form" class="zoom-form"><label for="zoom-input">${label('viewport')}</label><input id="zoom-input" class="mono-input" data-i18n-placeholder="zoomPlaceholder" placeholder="${text('zoomPlaceholder')}" spellcheck="false" autocomplete="off" /><button id="zoom-submit" class="button button-quiet" type="submit" disabled>${label('zoom')} <span aria-hidden="true">↗</span></button></form>
             <p id="zoom-error" class="inline-error" role="alert" hidden></p>
             <div id="visualization"></div>
             <div class="plot-legend"><span><i class="legend-band"></i>${label('legendBand')}</span><span><i class="legend-marker"></i>${label('legendMarker')}</span><span>${label('inclusive')}</span></div>
-          </section>
+            </div>
+          </details>
 
-          <section class="panel output-panel" data-i18n-aria="results" aria-label="${text('results')}">
-            <div class="output-heading"><div class="output-tabs" role="tablist" data-i18n-aria="resultFormat" aria-label="${text('resultFormat')}"><button id="tab-cidrs" class="active" type="button" role="tab" aria-selected="true" aria-controls="cidrs-panel">${label('cidrs')} <span id="cidr-tab-count" class="count-badge">0</span></button><button id="tab-ranges" type="button" role="tab" aria-selected="false" aria-controls="ranges-panel" tabindex="-1">${label('ranges')} <span id="range-tab-count" class="count-badge">0</span></button></div><button id="copy-cidrs" class="text-button" type="button" disabled>${label('copy')} <span aria-hidden="true">⧉</span></button></div>
-            <div id="cidrs-panel" role="tabpanel" aria-labelledby="tab-cidrs"><div class="output-table-heading"><span>NETWORK / PREFIX</span><span>FAMILY</span></div><ol id="cidr-list" class="cidr-list"></ol><div id="cidr-pagination" class="pagination" hidden></div></div>
-            <div id="ranges-panel" role="tabpanel" aria-labelledby="tab-ranges" hidden><div class="output-table-heading"><span>${label('rangeHeading')}</span><span>FAMILY</span></div><ol id="range-list" class="range-list"></ol><div id="range-pagination" class="pagination" hidden></div></div>
-            <div class="output-footer"><span id="result-status" role="status">${text('waiting')}</span><span id="copy-status" role="status"></span></div>
-          </section>
+          <details id="ranges-details" class="panel disclosure ranges-panel">
+            <summary class="panel-summary"><span class="summary-title">${label('ranges')} <span id="range-tab-count" class="count-badge">0</span></span><span class="disclosure-chevron" aria-hidden="true"></span></summary>
+            <div id="ranges-panel"><div class="output-table-heading"><span>${label('rangeHeading')}</span><span>FAMILY</span></div><ol id="range-list" class="range-list"></ol><div id="range-pagination" class="pagination" hidden></div></div>
+          </details>
         </div>
       </div>
     </main>
@@ -86,6 +96,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   </div>`;
 
 const $ = <T extends HTMLElement>(selector: string): T => document.querySelector<T>(selector)!;
+const openPanel = initializePanels();
 const initialInput = $<HTMLTextAreaElement>('#initial-input');
 const operationInput = $<HTMLInputElement>('#operation-input');
 const zoomInput = $<HTMLInputElement>('#zoom-input');
@@ -232,6 +243,7 @@ function updateControls(): void {
 }
 
 function showError(error: unknown): void {
+  if (error instanceof EngineError && /^operations(?:\[|$)/.test(error.field)) openPanel('operations');
   visibleError = error;
   errorBanner.textContent = formatEngineError(error);
   errorBanner.hidden = false;
@@ -288,7 +300,7 @@ function clearWorkspace(): void {
   cidrPage = rangePage = historyPage = 0;
   $('#zoom-error').hidden = true;
   copyState = undefined; $('#copy-status').textContent = '';
-  visualization.setMode('fit'); setViewButton('fit'); switchTab('cidrs');
+  visualization.setMode('fit'); setViewButton('fit');
   clearError(); renderResult();
 }
 
@@ -320,7 +332,8 @@ async function restoreShare(hash: string): Promise<void> {
     renderResult();
     visualization.restoreView(shared.view);
     setViewButton(Object.keys(shared.view.viewports).length ? 'custom' : shared.view.mode);
-    switchTab(shared.output.tab);
+    // Preserve the range view requested by links created before tabs were removed.
+    if (shared.output.tab === 'ranges') openPanel('ranges');
     elapsedMS = Math.max(1, Math.round(performance.now() - started));
     setResultStatus('complete'); setShareStatus('shareRestored');
   } catch (error) {
@@ -351,6 +364,8 @@ function emptyRow(text: string): HTMLLIElement {
 
 function renderHistory(): void {
   $('#operation-count').textContent = operations.length.toLocaleString(getLocale());
+  $('#operation-summary').textContent = text(operations.length === 1 ? 'operationApplied' : 'operationsApplied')
+    .replace('{count}', operations.length.toLocaleString(getLocale()));
   const list = $('#operation-history'); list.replaceChildren();
   if (operations.length === 0) list.append(emptyRow(text('noOperations')));
   for (const [index, operation] of operations.slice(historyPage * historyPageSize, (historyPage + 1) * historyPageSize).entries()) {
@@ -385,7 +400,11 @@ function renderRanges(): void {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'range-row-button';
     const value = document.createElement('code'); value.textContent = `${range.start} → ${range.end}`;
     button.append(value, familyLabel(range.start));
-    button.addEventListener('click', () => { visualization.select(rangePage * pageSize + index); $('#range-detail').scrollIntoView({ block: 'nearest' }); });
+    button.addEventListener('click', () => {
+      openPanel('visualization');
+      visualization.select(rangePage * pageSize + index);
+      $('#range-detail').scrollIntoView({ block: 'nearest' });
+    });
     row.append(button); list.append(row);
   }
   renderPagination($('#range-pagination'), result.ranges.length, rangePage, pageSize, (page) => { rangePage = page; renderRanges(); });
@@ -455,28 +474,10 @@ $('#zoom-form').addEventListener('submit', async (event) => {
     if (validated.ranges.length === 1) { visualization.zoom(validated.ranges[0], validated.cidrs[0]); setViewButton('custom'); }
   } catch (error) {
     if (current !== zoomGeneration) return;
+    openPanel('visualization');
     zoomFailure = error; zoomError.textContent = formatEngineError(error); zoomError.hidden = false;
   }
 });
-
-function switchTab(tab: 'cidrs' | 'ranges'): void {
-  for (const name of ['cidrs', 'ranges'] as const) {
-    const selected = tab === name;
-    $(`#${name}-panel`).hidden = !selected;
-    const button = $<HTMLButtonElement>(`#tab-${name}`); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; button.classList.toggle('active', selected);
-  }
-}
-
-for (const name of ['cidrs', 'ranges'] as const) {
-  $(`#tab-${name}`).addEventListener('click', () => switchTab(name));
-  $(`#tab-${name}`).addEventListener('keydown', (event) => {
-    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-      event.preventDefault();
-      const next = event.key === 'Home' ? 'cidrs' : event.key === 'End' ? 'ranges' : name === 'cidrs' ? 'ranges' : 'cidrs';
-      switchTab(next); $(`#tab-${next}`).focus();
-    }
-  });
-}
 
 $('#copy-cidrs').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(result.cidrs.join('\n')); setCopyStatus('copied'); }
@@ -492,7 +493,7 @@ $('#copy-share').addEventListener('click', async () => {
     request: { initial: [...initial], operations: operations.map((op) => ({ ...op })) },
     inputs: { initial: initialInput.value, operation: operationInput.value, zoom: zoomInput.value },
     view: visualization.exportView(),
-    output: { tab: $('#ranges-panel').hidden ? 'cidrs' : 'ranges', cidrPage, rangePage, historyPage },
+    output: { tab: 'cidrs', cidrPage, rangePage, historyPage },
   };
   // Capture the locale at click time, just like the rest of the snapshot.
   const url = localeURL(getLocale());

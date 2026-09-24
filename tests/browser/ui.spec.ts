@@ -12,6 +12,14 @@ async function apply(page: Page, input: string): Promise<void> {
   await expect(page.locator('#result-status')).toContainText('計算完了');
 }
 
+async function openPanel(page: Page, name: 'operations' | 'visualization' | 'ranges'): Promise<void> {
+  const panel = page.locator(`#${name}-details`);
+  if (!await panel.evaluate((element) => (element as HTMLDetailsElement).open)) {
+    await panel.locator(':scope > summary').click();
+  }
+  await expect(panel).toHaveJSProperty('open', true);
+}
+
 test('example, ordered edits, copy, details, and reset work without a network', async ({ page, context }) => {
   const network: string[] = [];
   page.on('request', (request) => network.push(request.url()));
@@ -25,17 +33,19 @@ test('example, ordered edits, copy, details, and reset work without a network', 
   await expect(page.locator('#count-ipv4')).toHaveText('5');
   await page.locator('#copy-cidrs').click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('192.0.2.0/31\n192.0.2.2/32\n192.0.2.6/31');
+  await openPanel(page, 'visualization');
   await page.locator('#plot-ipv4 .range-band').first().hover();
   await expect(page.locator('#range-detail')).toContainText('192.0.2.0');
   await expect(page.locator('#range-detail')).toContainText('192.0.2.2');
   await expect(page.locator('#range-detail')).toContainText('192.0.2.0/31');
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#add-operation').click();
   await expect(page.locator('#cidr-list code')).toHaveText(['192.0.2.0/30', '192.0.2.6/31']);
   await page.locator('#operation-input').fill('192.0.2.3');
   await page.locator('#remove-operation').click();
   await expect(page.locator('#count-ipv4')).toHaveText('5');
-  await page.locator('#tab-ranges').click();
+  await openPanel(page, 'ranges');
   await expect(page.locator('#range-list code')).toHaveText(['192.0.2.0 → 192.0.2.2', '192.0.2.6 → 192.0.2.7']);
   await page.locator('#range-list button').last().click();
   await expect(page.locator('#range-detail')).toContainText('192.0.2.6/31');
@@ -51,12 +61,14 @@ test('invalid edits and zoom display structured errors and preserve the set', as
   await ready(page);
   await apply(page, '192.0.2.7/24');
   await expect(page.locator('#cidr-list code')).toHaveText(['192.0.2.0/24']);
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('::ffff:192.0.2.1');
   await page.locator('#remove-operation').click();
   await expect(page.locator('#error-banner')).toContainText('operations[0].value');
   await expect(page.locator('#error-banner')).toContainText('unsupported_address');
   await expect(page.locator('#count-ipv4')).toHaveText('256');
   await expect(page.locator('#operation-count')).toHaveText('0');
+  await openPanel(page, 'visualization');
   await page.locator('#zoom-input').fill('fe80::1%en0');
   await page.locator('#zoom-submit').click();
   await expect(page.locator('#zoom-error')).toBeVisible();
@@ -71,6 +83,7 @@ test('IPv6 /0 counts exactly and zoom retains low address bits and tiny markers'
   expect((await page.locator('#count-ipv6').innerText()).replaceAll(',', '')).toBe('340282366920938463463374607431768211456');
   await expect(page.locator('#count-ipv4')).toHaveText('4,294,967,296');
   await apply(page, 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:fff1\nffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe');
+  await openPanel(page, 'visualization');
   await page.locator('#view-all').click();
   await expect(page.locator('#plot-ipv6 .range-marker')).toHaveCount(1);
   await page.locator('#plot-ipv6 .range-marker').focus();
@@ -106,6 +119,7 @@ test('real Worker replies cannot replace a newer reset or edited draft', async (
   });
   await expect(page.locator('#draft-status')).toContainText('未適用');
   // A subsequent real zoom response is a barrier after all earlier Worker calculations.
+  await openPanel(page, 'visualization');
   await page.locator('#zoom-input').fill('192.0.2.0/24');
   await page.locator('#zoom-submit').click();
   await expect(page.locator('#plot-ipv4 .viewport-label')).toHaveText('192.0.2.0/24');
@@ -114,6 +128,7 @@ test('real Worker replies cannot replace a newer reset or edited draft', async (
 
 test('a pending typed zoom cannot replace a newer selected-range zoom', async ({ page }) => {
   await ready(page);
+  await openPanel(page, 'visualization');
   await page.locator('#plot-ipv4 .range-band').click();
   await page.evaluate(() => {
     const input = document.querySelector<HTMLInputElement>('#zoom-input')!;
@@ -123,6 +138,7 @@ test('a pending typed zoom cannot replace a newer selected-range zoom', async ({
     document.querySelector<HTMLButtonElement>('#range-detail button')!.click();
   });
   // Another real Worker request provides a completion barrier without mocking replies.
+  await openPanel(page, 'operations');
   await page.locator('#operation-input').fill('192.0.2.0');
   await page.locator('#add-operation').click();
   await expect(page.locator('#operation-count')).toHaveText('1');
@@ -146,6 +162,7 @@ test('Wasm accepts more than 4096 inputs and result lists stay paginated', async
   await expect(page.locator('#cidr-pagination')).toBeVisible();
   await page.locator('#cidr-pagination button').last().click();
   await expect(page.locator('#cidr-list code').first()).toHaveText('10.0.40.1/32');
+  await openPanel(page, 'visualization');
   await expect(page.locator('#plot-ipv4 .range-band')).not.toHaveCount(0);
 });
 
