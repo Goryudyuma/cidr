@@ -34,7 +34,7 @@
     "prettier": "3.9.8",
     "typescript": "6.0.3",
     "typescript-eslint": "8.70.1",
-    "vite": "8.2.2",
+    "vite": "8.2.4",
     "wrangler": "4.147.0"
   }
 }
