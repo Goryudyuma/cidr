@@ -27,14 +27,14 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@playwright/test": "1.62.1",
-    "@types/node": "24.13.3",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.0",
     "eslint": "10.11.0",
     "globals": "17.12.0",
-    "prettier": "3.9.8",
+    "prettier": "3.9.9",
     "typescript": "6.0.3",
     "typescript-eslint": "8.70.1",
-    "vite": "8.2.2",
+    "vite": "8.3.1",
     "wrangler": "4.147.0"
   }
 }
